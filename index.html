@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zootopia Velocity — 3D Showroom &amp; Driving Simulator</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b1220'/%3E%3Cpath d='M12 38l7-12h26l7 12v10H12z' fill='%2338bdf8'/%3E%3Ccircle cx='20' cy='48' r='6' fill='%23f59e0b'/%3E%3Ccircle cx='44' cy='48' r='6' fill='%23f59e0b'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./css/style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="canvas-container"></div>
+  <div id="overtake-feed"></div>
+
+  <!-- 3D ASSET LOADING SCREEN -->
+  <div id="loading-screen">
+    <div class="glass load-card">
+      <div class="load-title">ZOOTOPIA VELOCITY</div>
+      <div class="load-bar-track">
+        <div id="load-bar-fill" class="load-bar-fill"></div>
+      </div>
+      <div id="load-status" class="load-status">Loading 3D Showroom...</div>
+    </div>
+  </div>
+
+  <!-- 3D SPINNING PLATFORM SHOWROOM OVERLAY -->
+  <div id="showroom-ui" class="hidden">
+    <!-- Top Brand Ribbon + Mode + Customize -->
+    <div class="sr-top">
+      <div class="glass sr-brands-wrap">
+        <div class="brand-pills" id="brand-pills"></div>
+      </div>
+      <div class="glass sr-top-actions">
+        <span class="sr-counter" id="sr-counter">1 / 19</span>
+        <div class="sr-modes" id="mode-selector">
+          <button class="sr-mode active" data-mode="career">Career</button>
+          <button class="sr-mode" data-mode="timeattack">Time</button>
+          <button class="sr-mode" data-mode="freeride">Free</button>
+        </div>
+        <button id="btn-toggle-custom" class="btn primary">Customize</button>
+      </div>
+    </div>
+
+    <!-- Left / Right Platform Turntable Arrows -->
+    <button id="btn-prev-car" class="sr-arrow sr-arrow-l" title="Previous Car (←)">◀</button>
+    <button id="btn-next-car" class="sr-arrow sr-arrow-r" title="Next Car (→)">▶</button>
+
+    <!-- Bottom Minimal Showcase Bar + Mini Dyno + DRIVE -->
+    <div class="sr-bottom">
+      <div class="glass sr-showcase">
+        <div class="sr-car-id">
+          <div class="sr-brand-sub" id="garage-brand-lbl">FERRARI</div>
+          <div class="sr-model-name" id="garage-car-title">458 Italia</div>
+          <div class="sr-badges">
+            <span class="co-tag asp-na" id="garage-asp-tag">NA</span>
+            <span class="co-tag" id="garage-drive-tag">RWD</span>
+            <span class="co-tag" id="garage-eng-tag">4.5L V8</span>
+          </div>
+        </div>
+
+        <canvas id="dyno-canvas" width="130" height="56" title="Yellow: Torque (Nm) · Cyan: Power (HP)"></canvas>
+
+        <div class="sr-stats">
+          <div class="stat-line"><span class="stat-name">SPD</span><div class="stat-bar"><div class="stat-fill" id="st-spd"></div></div><span class="stat-num" id="stn-spd">325 km/h</span></div>
+          <div class="stat-line"><span class="stat-name">PWR</span><div class="stat-bar"><div class="stat-fill" id="st-pwr"></div></div><span class="stat-num" id="stn-pwr">570 HP</span></div>
+          <div class="stat-line"><span class="stat-name">TRQ</span><div class="stat-bar"><div class="stat-fill" id="st-trq"></div></div><span class="stat-num" id="stn-trq">540 Nm</span></div>
+          <div class="stat-line"><span class="stat-name">GRIP</span><div class="stat-bar"><div class="stat-fill" id="st-grp"></div></div><span class="stat-num" id="stn-grp">1.46 G</span></div>
+        </div>
+
+        <button id="btn-drive-now" class="sr-drive-btn">DRIVE</button>
+      </div>
+    </div>
+
+    <!-- Collapsible Right-Side Visual Customize Drawer -->
+    <div id="custom-drawer" class="glass">
+      <div class="g-header">
+        <div class="g-tabs">
+          <button class="g-tab active" data-tab="design">Style</button>
+          <button class="g-tab" data-tab="specs">Tune</button>
+        </div>
+        <button id="btn-close-custom" class="btn">✕</button>
+      </div>
+
+      <div class="g-body">
+        <!-- STYLE TAB: VISUAL PAINT, FINISH, RIMS, CALIPERS, AERO, UNDERGLOW -->
+        <div class="g-section active" id="tab-design">
+          <div class="mod-group">
+            <div class="mod-lbl">Paint</div>
+            <div class="swatch-row" id="paint-swatches">
+              <div class="swatch active" data-color="#d91b24" style="background:#d91b24;" title="Red"></div>
+              <div class="swatch" data-color="#0ea5e9" style="background:#0ea5e9;" title="Blue"></div>
+              <div class="swatch" data-color="#f59e0b" style="background:#f59e0b;" title="Amber"></div>
+              <div class="swatch" data-color="#eab308" style="background:#eab308;" title="Yellow"></div>
+              <div class="swatch" data-color="#16a34a" style="background:#16a34a;" title="Green"></div>
+              <div class="swatch" data-color="#7c3aed" style="background:#7c3aed;" title="Purple"></div>
+              <div class="swatch" data-color="#f8fafc" style="background:#f8fafc;" title="White"></div>
+              <div class="swatch" data-color="#64748b" style="background:#64748b;" title="Grey"></div>
+              <div class="swatch" data-color="#111827" style="background:#111827;" title="Black"></div>
+              <input type="color" id="custom-paint" value="#d91b24" title="Custom Color" class="color-dot-input" />
+              <input type="color" id="custom-accent" value="#111827" title="2-Tone Accent" class="color-dot-input" />
+            </div>
+          </div>
+
+          <div class="mod-group">
+            <div class="mod-lbl">Finish</div>
+            <div class="chip-row" data-config="finish">
+              <button class="mod-chip active" data-val="gloss"><i class="vis-dot" style="background:linear-gradient(135deg,#fff,#ef4444)"></i>Gloss</button>
+              <button class="mod-chip" data-val="metallic"><i class="vis-dot" style="background:linear-gradient(135deg,#cbd5e1,#475569)"></i>Metal</button>
+              <button class="mod-chip" data-val="pearl"><i class="vis-dot" style="background:linear-gradient(135deg,#a855f7,#38bdf8)"></i>Pearl</button>
+              <button class="mod-chip" data-val="matte"><i class="vis-dot" style="background:#334155"></i>Matte</button>
+              <button class="mod-chip" data-val="chrome"><i class="vis-dot" style="background:linear-gradient(135deg,#fff,#94a3b8)"></i>Chrome</button>
+              <button class="mod-chip" data-val="carbon"><i class="vis-dot" style="background:#111827"></i>Carbon</button>
+            </div>
+          </div>
+
+          <div class="mod-group">
+            <div class="mod-lbl">Rims</div>
+            <div class="dot-row" data-config="rims">
+              <button class="dot-chip active" data-val="silver" style="background:#e2e8f0;" title="Silver"></button>
+              <button class="dot-chip" data-val="gold" style="background:#eab308;" title="Gold"></button>
+              <button class="dot-chip" data-val="black" style="background:#141820;" title="Black"></button>
+              <button class="dot-chip" data-val="bronze" style="background:#9a5b2c;" title="Bronze"></button>
+              <button class="dot-chip" data-val="chrome" style="background:linear-gradient(135deg,#fff,#94a3b8);" title="Chrome"></button>
+            </div>
+          </div>
+
+          <div class="mod-group">
+            <div class="mod-lbl">Calipers</div>
+            <div class="dot-row" data-config="caliperColor">
+              <button class="dot-chip active" data-val="#ef4444" style="background:#ef4444;" title="Red"></button>
+              <button class="dot-chip" data-val="#eab308" style="background:#eab308;" title="Gold"></button>
+              <button class="dot-chip" data-val="#84cc16" style="background:#84cc16;" title="Acid Green"></button>
+              <button class="dot-chip" data-val="#38bdf8" style="background:#38bdf8;" title="Blue"></button>
+              <button class="dot-chip" data-val="#f97316" style="background:#f97316;" title="Orange"></button>
+            </div>
+          </div>
+
+          <div class="mod-group">
+            <div class="mod-lbl">Rear Wing</div>
+            <div class="chip-row" data-config="spoiler">
+              <button class="mod-chip active" data-val="none">Stock</button>
+              <button class="mod-chip" data-val="lip">Lip</button>
+              <button class="mod-chip" data-val="gt">GT3</button>
+              <button class="mod-chip" data-val="timeattack">Big Wing</button>
+            </div>
+          </div>
+
+          <div class="mod-group">
+            <div class="mod-lbl">Roof</div>
+            <div class="chip-row" data-config="roofAcc">
+              <button class="mod-chip active" data-val="none">Clean</button>
+              <button class="mod-chip" data-val="scoop">Scoop</button>
+              <button class="mod-chip" data-val="box">Box</button>
+              <button class="mod-chip" data-val="rally">Rally</button>
+              <button class="mod-chip" data-val="zpd">Police</button>
+            </div>
+          </div>
+
+          <div class="mod-group">
+            <div class="mod-lbl">Underglow</div>
+            <div class="dot-row" data-config="underglow">
+              <button class="dot-chip active off-dot" data-val="none" title="Off">✕</button>
+              <button class="dot-chip" data-val="#38bdf8" style="background:#38bdf8;" title="Cyan"></button>
+              <button class="dot-chip" data-val="#f43f5e" style="background:#f43f5e;" title="Crimson"></button>
+              <button class="dot-chip" data-val="#f59e0b" style="background:#f59e0b;" title="Amber"></button>
+              <button class="dot-chip" data-val="#4ade80" style="background:#4ade80;" title="Emerald"></button>
+              <button class="dot-chip" data-val="#a855f7" style="background:#a855f7;" title="Violet"></button>
+            </div>
+          </div>
+
+          <div class="mod-group">
+            <div class="mod-lbl">Glass Tint &amp; Livery</div>
+            <div class="chip-row" data-config="windowTint">
+              <button class="mod-chip" data-val="clear">Clear</button>
+              <button class="mod-chip active" data-val="smoke">Smoke</button>
+              <button class="mod-chip" data-val="limo">Limo</button>
+              <button class="mod-chip" data-val="blue">Ice</button>
+            </div>
+            <div class="chip-row" data-config="livery" style="margin-top:3px;">
+              <button class="mod-chip active" data-val="none">Solid</button>
+              <button class="mod-chip" data-val="twotone">2-Tone</button>
+            </div>
+          </div>
+
+          <div class="mod-group">
+            <div class="mod-lbl">Camber</div>
+            <div class="chip-row" data-mod="camberDeg">
+              <button class="mod-chip active" data-val="0">0°</button>
+              <button class="mod-chip" data-val="-3">-3°</button>
+              <button class="mod-chip" data-val="-6">-6°</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- TUNE TAB: TRANSMISSION, ASPIRATION, ECU, TIRES, BRAKES, STANCE -->
+        <div class="g-section" id="tab-specs">
+          <div class="mod-group">
+            <div class="mod-lbl">Gearbox</div>
+            <div class="chip-row" data-config="transmission">
+              <button class="mod-chip active" data-val="AT">Auto (AT)</button>
+              <button class="mod-chip" data-val="MT">Manual (MT · Q/E)</button>
+            </div>
+          </div>
+          <div class="mod-group">
+            <div class="mod-lbl">Induction</div>
+            <div class="chip-row" data-config="aspirationMod">
+              <button class="mod-chip active" data-val="stock">Stock</button>
+              <button class="mod-chip" data-val="na_itb">NA ITB</button>
+              <button class="mod-chip" data-val="single_turbo">Turbo</button>
+              <button class="mod-chip" data-val="twin_turbo">Twin-T</button>
+              <button class="mod-chip" data-val="supercharger">SC</button>
+            </div>
+          </div>
+          <div class="mod-group">
+            <div class="mod-lbl">ECU Stage</div>
+            <div class="chip-row" data-mod="engineStage">
+              <button class="mod-chip active" data-val="0">Stock</button>
+              <button class="mod-chip" data-val="1">Stg 1</button>
+              <button class="mod-chip" data-val="2">Stg 2</button>
+              <button class="mod-chip" data-val="3">Stg 3</button>
+            </div>
+          </div>
+          <div class="mod-group">
+            <div class="mod-lbl">Gear Ratio</div>
+            <div class="chip-row" data-config="gearRatioMode">
+              <button class="mod-chip" data-val="short">Accel</button>
+              <button class="mod-chip active" data-val="stock">Stock</button>
+              <button class="mod-chip" data-val="long">Top Spd</button>
+            </div>
+          </div>
+          <div class="mod-group">
+            <div class="mod-lbl">Drivetrain</div>
+            <div class="chip-row" data-config="drivetrainMod">
+              <button class="mod-chip active" data-val="stock">Stock</button>
+              <button class="mod-chip" data-val="RWD">RWD</button>
+              <button class="mod-chip" data-val="AWD">AWD</button>
+              <button class="mod-chip" data-val="FWD">FWD</button>
+            </div>
+          </div>
+          <div class="mod-group">
+            <div class="mod-lbl">Tires</div>
+            <div class="chip-row" data-mod="tires">
+              <button class="mod-chip" data-val="0">Street</button>
+              <button class="mod-chip active" data-val="1">Sport</button>
+              <button class="mod-chip" data-val="2">Slick</button>
+              <button class="mod-chip" data-val="3">Track</button>
+              <button class="mod-chip" data-val="4">Drift</button>
+            </div>
+          </div>
+          <div class="mod-group">
+            <div class="mod-lbl">Brakes</div>
+            <div class="chip-row" data-mod="brakes">
+              <button class="mod-chip" data-val="0">OEM</button>
+              <button class="mod-chip active" data-val="1">Sport</button>
+              <button class="mod-chip" data-val="2">6-Pot</button>
+              <button class="mod-chip" data-val="3">Ceramic</button>
+            </div>
+          </div>
+          <div class="mod-group">
+            <div class="mod-lbl">Ride Height</div>
+            <div class="chip-row" data-mod="suspension">
+              <button class="mod-chip" data-val="0">Stock</button>
+              <button class="mod-chip active" data-val="1">-25mm</button>
+              <button class="mod-chip" data-val="2">-45mm</button>
+              <button class="mod-chip" data-val="3">-60mm</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LIVE REAR-VIEW & SIDE MIRROR BEZELS (HIGHWAY MODE) -->
+  <div id="mirrors-layer">
+    <div id="mirror-rear" class="mirror-frame"><span class="mirror-tag">REAR VIEW</span></div>
+    <div id="mirror-left" class="mirror-frame"><span class="mirror-tag">L MIRROR</span><span id="bsw-left" class="bsw-dot"></span></div>
+    <div id="mirror-right" class="mirror-frame"><span class="mirror-tag">R MIRROR</span><span id="bsw-right" class="bsw-dot"></span></div>
+  </div>
+
+  <!-- PAUSE SCREEN OVERLAY -->
+  <div id="pause-overlay" class="overlay-screen hidden">
+    <div class="glass menu-card">
+      <div class="menu-logo">PAUSED</div>
+      <div class="menu-sub" id="pause-stats">Score: 0 · Overtakes: 0 · Best: —</div>
+      <div class="menu-actions">
+        <button id="btn-resume" class="menu-btn hero">Resume (P)</button>
+        <button id="btn-pause-garage" class="menu-btn">3D Showroom (G)</button>
+        <button id="btn-pause-restart" class="menu-btn">Restart</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOP HIGHWAY HUD -->
+  <div id="top-hud">
+    <div class="hud-left-col">
+      <div class="glass score-card">
+        <div class="brand-row">
+          <div class="brand-title" id="district-label">Sector 1 · 0m</div>
+          <div class="credits-pill" id="credits-val">$25,000 CR</div>
+        </div>
+        <div class="score-row">
+          <div class="score-val" id="score-val">0</div>
+          <div class="combo-badge" id="combo-badge">x1.0 CHAIN</div>
+        </div>
+        <div class="score-sub">
+          <span id="ot-count">Overtakes: 0</span>
+          <span id="best-rating">Best: —</span>
+          <span id="fps-readout">60 FPS</span>
+        </div>
+        <div class="combo-bar-bg"><div class="combo-bar-fill" id="combo-bar"></div></div>
+      </div>
+
+      <div class="glass mission-card" id="mission-card">
+        <div class="mission-hdr">
+          <span id="mission-type-lbl">CAREER STAGE 1</span>
+          <span id="mission-reward-lbl">+$2,500 CR</span>
+        </div>
+        <div class="mission-title" id="mission-title">Perform 3 Near-Miss Overtakes</div>
+        <div class="mission-bar-bg"><div class="mission-bar-fill" id="mission-bar"></div></div>
+      </div>
+    </div>
+
+    <div class="hud-right-col">
+      <div class="glass toolbar">
+        <button id="btn-pause" class="btn">Pause (P)</button>
+        <button id="btn-garage" class="btn primary">Showroom (G)</button>
+        <button id="btn-trans-top" class="btn active">Gear: AUTO (T)</button>
+        <button id="btn-cam" class="btn active">Cam: Chase (C)</button>
+        <button id="btn-mirrors" class="btn active">Mirrors: ON (M)</button>
+        <button id="btn-sound" class="btn active">Engine: ON</button>
+      </div>
+
+      <div class="glass radar-card">
+        <div class="radar-lbl">Traffic Radar</div>
+        <canvas id="radar-canvas" width="90" height="124"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM HIGHWAY HUD -->
+  <div id="bottom-hud">
+    <div class="glass speedo-card">
+      <canvas id="tach-canvas" width="148" height="148"></canvas>
+      <div class="speed-block">
+        <div class="speed-num" id="speed-val">0</div>
+        <div class="speed-unit">KM/H</div>
+      </div>
+      <div class="gear-col">
+        <div class="gear-row">
+          <button id="btn-shift-down" class="shift-btn" title="Downshift (Q)">-</button>
+          <div class="gear-badge">
+            <div class="gear-val" id="gear-val">1</div>
+            <div class="gear-lbl">GEAR</div>
+          </div>
+          <button id="btn-shift-up" class="shift-btn" title="Upshift (E)">+</button>
+        </div>
+        <button id="btn-trans-mode" class="trans-pill" title="Toggle Auto / Manual (T)">AUTO (T)</button>
+      </div>
+      <div class="gauges">
+        <div>
+          <div class="bar-lbl"><span>RPM</span><span id="rpm-val">900 / 9000</span></div>
+          <div class="bar-track"><div class="rpm-fill" id="rpm-fill"></div></div>
+        </div>
+        <div>
+          <div class="bar-lbl"><span>NITRO (SHIFT)</span><span id="nos-val">100%</span></div>
+          <div class="bar-track"><div class="nos-fill" id="nos-fill"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="glass telemetry-card">
+      <div class="tele-top">
+        <span class="tele-car-name" id="hud-car-name">Ferrari 458 Italia</span>
+        <span class="asp-badge" id="hud-asp-badge">4.5L V8 · NA</span>
+      </div>
+      <div class="tele-metrics">
+        <div class="tm-box"><span class="tm-lbl">Power</span><span class="tm-val" id="hud-live-hp">68 HP</span></div>
+        <div class="tm-box"><span class="tm-lbl">Torque</span><span class="tm-val" id="hud-live-trq">320 Nm</span></div>
+        <div class="tm-box"><span class="tm-lbl">Boost</span><span class="tm-val" id="hud-live-boost">NA ATMOS</span></div>
+        <div class="tm-box"><span class="tm-lbl">Grip</span><span class="tm-val" id="hud-live-grip" style="color:#4ade80;">100%</span></div>
+      </div>
+      <div class="wave-row">
+        <span class="wave-lbl">Wave</span>
+        <canvas id="wave-canvas" width="170" height="22"></canvas>
+      </div>
+    </div>
+
+    <div class="glass stereo-card">
+      <div class="stereo-top">
+        <div class="stereo-track" id="stereo-track">FM 1 · Sahara Synthwave</div>
+        <div class="eq-bars" id="eq-bars">
+          <div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div>
+          <div class="eq-bar"></div><div class="eq-bar"></div>
+        </div>
+      </div>
+      <div class="stereo-ctrls">
+        <button id="btn-prev-track" class="st-btn" title="Prev">◀</button>
+        <button id="btn-play-music" class="st-btn" title="Music">▶ Music</button>
+        <button id="btn-next-track" class="st-btn" title="Next">▶|</button>
+        <input type="range" id="music-vol" min="0" max="1" step="0.05" value="0.55" title="Volume" />
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
