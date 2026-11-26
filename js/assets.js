@@ -49,20 +49,32 @@ export async function loadAllAssets(renderer, onProgress) {
     if (!url) return Promise.resolve(null);
 
     pendingLoads[key] = new Promise(resolve => {
+      let settled = false;
+      const finish = (res, failed = false) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (failed) failedLoads.add(key);
+        if (onStepLabel) onStepLabel();
+        resolve(res);
+      };
+      const timer = setTimeout(() => {
+        console.warn('GLB load timeout:', url);
+        finish(null, true);
+      }, 15000);
       gltfLoader.load(
         url,
         gltf => {
-          modelsCache[key] = gltf ? gltf.scene : null;
-          if (!modelsCache[key]) failedLoads.add(key);
-          if (onStepLabel) onStepLabel();
-          resolve(modelsCache[key]);
+         if (settled) return;
+          const scene = gltf ? gltf.scene : null;
+          modelsCache[key] = scene;
+          finish(scene, !scene);
         },
         undefined,
         err => {
+         if (settled) return;
           console.warn('GLB load warning:', url, err);
-          failedLoads.add(key);
-          if (onStepLabel) onStepLabel();
-          resolve(null);
+          finish(null, true);
         }
       );
     }).finally(() => { delete pendingLoads[key]; });
@@ -70,7 +82,7 @@ export async function loadAllAssets(renderer, onProgress) {
   }
 
   // Initial fast boot set (6 core models for instant start & traffic) + on-demand lazy loading for all other .GLBs
-  const bootKeys = ['ferrari', 'sedan', 'bmwm5', 'muscle', 'g63', 'suv_q7'];
+  const bootKeys = ['ferrari'];
   const totalSteps = bootKeys.length + 4;
   let completed = 0;
   function step(label) {
@@ -80,34 +92,58 @@ export async function loadAllAssets(renderer, onProgress) {
 
   function loadHDR(url, label) {
     return new Promise(resolve => {
+      let settled = false;
+      const finish = tex => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (label) step(label);
+        resolve(tex);
+      };
+      const timer = setTimeout(() => {
+        console.warn('HDR load timeout:', url);
+        finish(null);
+      }, 15000);
       rgbeLoader.load(
         url,
         tex => {
+          if (settled) return;
           tex.mapping = THREE.EquirectangularReflectionMapping;
-          step(label);
-          resolve(tex);
+          finish(tex);
         },
         undefined,
-        () => { step(label); resolve(null); }
+        () => { finish(null); }
       );
     });
   }
 
   function loadTex(url, repeatX = 1, repeatY = 1, isColor = true, label = null) {
     return new Promise(resolve => {
+      let settled = false;
+      const finish = tex => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (label) step(label);
+        resolve(tex);
+      };
+      const timer = setTimeout(() => {
+        console.warn('Texture load timeout:', url);
+        finish(null);
+      }, 15000);
       texLoader.load(
         url,
         tex => {
+          if (settled) return;
           tex.wrapS = THREE.RepeatWrapping;
           tex.wrapT = THREE.RepeatWrapping;
           tex.repeat.set(repeatX, repeatY);
           tex.anisotropy = Math.min(maxAniso, 4);
           if (isColor) tex.colorSpace = THREE.SRGBColorSpace;
-          if (label) step(label);
-          resolve(tex);
+          finish(tex);
         },
         undefined,
-        () => { if (label) step(label); resolve(null); }
+        () => { finish(null); }
       );
     });
   }
@@ -121,12 +157,17 @@ export async function loadAllAssets(renderer, onProgress) {
     loadHDR('./assets/hdr/blouberg_sunrise_2_1k.hdr', 'Loaded Studio Reflection Map (.HDR)'),
     loadTex('./assets/textures/ferrari_ao.png', 1, 1, false, 'Loaded Chassis Contact Shadow Map'),
     loadTex('./assets/textures/Carbon.png', 12, 12, true, 'Loaded Carbon Fiber Weave Maps'),
-    loadTex('./assets/textures/Carbon_Normal.png', 12, 12, false),
+    loadTex('./assets/textures/Carbon_Normal.png', 12, 12, false, 'Loaded Carbon Fiber Normal Map'),
     ...bootKeys.map(k => loadGLBKey(k, () => step(`Loaded 3D ${k.toUpperCase()} Chassis (.GLB)`)))
   ]);
 
-  // Load remaining .GLB models strictly on demand when selected in the showroom
-  // so background Draco decoding never competes with rendering or car switching.
+  // Non-blocking sequential background preload for remaining showroom vehicles
+  const bgKeys = ['sedan', 'bmwm5', 'muscle', 'g63', 'suv_q7'];
+  (async () => {
+    for (const k of bgKeys) {
+      await loadGLBKey(k);
+    }
+  })();
   return {
     models: modelsCache,
     ensureGLBModel: loadGLBKey,
