@@ -65,7 +65,7 @@ export async function loadAllAssets(renderer, onProgress) {
           resolve(null);
         }
       );
-    });
+    }).finally(() => { delete pendingLoads[key]; });
     return pendingLoads[key];
   }
 
@@ -101,7 +101,7 @@ export async function loadAllAssets(renderer, onProgress) {
           tex.wrapS = THREE.RepeatWrapping;
           tex.wrapT = THREE.RepeatWrapping;
           tex.repeat.set(repeatX, repeatY);
-          tex.anisotropy = maxAniso;
+          tex.anisotropy = Math.min(maxAniso, 4);
           if (isColor) tex.colorSpace = THREE.SRGBColorSpace;
           if (label) step(label);
           resolve(tex);
