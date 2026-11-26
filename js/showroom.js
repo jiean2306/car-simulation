@@ -72,7 +72,21 @@ export function createShowroom(assets, vehicles) {
     slot.carId = null;
     slot.loading = false;
   }
-
+function disposeCarGroup(group) {
+    if (!group) return;
+    group.traverse((obj) => {
+      if (obj.geometry && typeof obj.geometry.dispose === 'function') {
+        obj.geometry.dispose();
+      }
+      if (obj.material) {
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const m of mats) {
+          if (m && typeof m.dispose === 'function') m.dispose();
+        }
+      }
+    });
+}
+  
   function getCachedOrBuildCar(def, force) {
     const cacheKey = def.id;
     if (!force && modelCache.has(cacheKey)) {
@@ -86,7 +100,9 @@ export function createShowroom(assets, vehicles) {
       modelCache.set(cacheKey, res.group);
       if (modelCache.size > 5) {
         const oldestKey = modelCache.keys().next().value;
+        const oldestGroup = modelCache.get(oldestKey);
         modelCache.delete(oldestKey);
+        disposeCarGroup(oldestGroup);
       }
     }
     return res;
@@ -174,15 +190,41 @@ export function createShowroom(assets, vehicles) {
     }
   }
 
-  function onPointerDown(x) { dragging = true; lastX = x; }
-  function onPointerMove(x) {
+let activePointerId = null;
+  function onPointerDown(xOrEvent, pointerId) {
+    const x = typeof xOrEvent === 'number' ? xOrEvent : xOrEvent.clientX;
+    const pid = pointerId !== undefined ? pointerId : (typeof xOrEvent === 'object' && xOrEvent ? xOrEvent.pointerId : null);
+    dragging = true;
+    activePointerId = pid ?? null;
+    lastX = x;
+  }
+  function onPointerMove(xOrEvent, pointerId) {
     if (!dragging || !slots[index]) return;
+    const pid = pointerId !== undefined ? pointerId : (typeof xOrEvent === 'object' && xOrEvent ? xOrEvent.pointerId : null);
+    if (activePointerId !== null && pid != null && pid !== activePointerId) return;
+    const x = typeof xOrEvent === 'number' ? xOrEvent : xOrEvent.clientX;
     slots[index].holder.rotation.y += (x - lastX) * 0.012;
     lastX = x;
     userSpinHold = 2.5;
   }
-  function onPointerUp() { dragging = false; }
+  function onPointerUp(eOrId) {
+    const pid = typeof eOrId === 'object' && eOrId ? eOrId.pointerId : eOrId;
+    if (activePointerId !== null && pid != null && pid !== activePointerId) return;
+    dragging = false;
+    activePointerId = null;
+  }
 
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pointerdown', (e) => {
+      if (e.target && e.target.tagName === 'CANVAS') {
+        if (e.target.style && e.target.style.touchAction !== 'none') e.target.style.touchAction = 'none';
+        onPointerDown(e);
+      }
+    });
+    window.addEventListener('pointermove', (e) => onPointerMove(e));
+    window.addEventListener('pointerup', (e) => onPointerUp(e));
+    window.addEventListener('pointercancel', (e) => onPointerUp(e));
+  }
   function resize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
