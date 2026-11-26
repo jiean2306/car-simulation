@@ -689,8 +689,8 @@ bindTouchHold('btn-gas', 'ArrowUp');
 bindTouchHold('btn-brake', 'ArrowDown');
 bindTouchHold('btn-handbrake', 'Space');
 bindTouchHold('btn-nos', 'ShiftLeft');
-document.getElementById('btn-shift-up')?.addEventListener('pointerdown', e => { e.preventDefault(); audio.ensureAudio(); setTransmissionMode('MT'); manualShift(1); });
-document.getElementById('btn-shift-down')?.addEventListener('pointerdown', e => { e.preventDefault(); audio.ensureAudio(); setTransmissionMode('MT'); manualShift(-1); });
+document.getElementById('btn-mc-shift-up')?.addEventListener('pointerdown', e => { e.preventDefault(); audio.ensureAudio(); setTransmissionMode('MT'); manualShift(1); });
+document.getElementById('btn-mc-shift-down')?.addEventListener('pointerdown', e => { e.preventDefault(); audio.ensureAudio(); setTransmissionMode('MT'); manualShift(-1); });
 
   renderer.domElement.addEventListener('mousedown', e => {
     if (gameState === 'garage') {
