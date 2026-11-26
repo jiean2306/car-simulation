@@ -37,7 +37,11 @@
         <div class="brand-pills" id="brand-pills"></div>
       </div>
       <div class="glass sr-top-actions">
-        <span class="sr-counter" id="sr-counter">1 / 19</span>
+        <button id="btn-car-dropdown" class="btn active car-dd-trigger" title="Browse & Pick Any Car">
+          <span>All Cars</span>
+          <span class="sr-counter" id="sr-counter">1 / 127</span>
+          <span>▾</span>
+        </button>
         <div class="sr-modes" id="mode-selector">
           <button class="sr-mode active" data-mode="career">Career</button>
           <button class="sr-mode" data-mode="timeattack">Time</button>
@@ -47,6 +51,15 @@
       </div>
     </div>
 
+    <!-- Searchable Car Model Picker Dropdown with SVG Model Icons -->
+    <div id="car-dropdown-panel" class="glass car-dd-panel hidden">
+      <div class="car-dd-header">
+        <input type="text" id="car-dd-search" class="car-dd-search" placeholder="Search 127 cars (RS6, G63, Civic Type R, Supra, X5)..." autocomplete="off" />
+        <span id="car-dd-count" class="car-dd-count">127 cars</span>
+      </div>
+      <div id="car-dd-list" class="car-dd-list"></div>
+    </div>
+
     <!-- Left / Right Platform Turntable Arrows -->
     <button id="btn-prev-car" class="sr-arrow sr-arrow-l" title="Previous Car (←)">◀</button>
     <button id="btn-next-car" class="sr-arrow sr-arrow-r" title="Next Car (→)">▶</button>
@@ -54,9 +67,9 @@
     <!-- Bottom Minimal Showcase Bar + Mini Dyno + DRIVE -->
     <div class="sr-bottom">
       <div class="glass sr-showcase">
-        <div class="sr-car-id">
+        <div class="sr-car-id" id="sr-car-id-btn" title="Click to browse all cars">
           <div class="sr-brand-sub" id="garage-brand-lbl">FERRARI</div>
-          <div class="sr-model-name" id="garage-car-title">458 Italia</div>
+          <div class="sr-model-name"><span id="garage-car-title">458 Italia</span> <span class="sr-dd-caret">▾</span></div>
           <div class="sr-badges">
             <span class="co-tag asp-na" id="garage-asp-tag">NA</span>
             <span class="co-tag" id="garage-drive-tag">RWD</span>

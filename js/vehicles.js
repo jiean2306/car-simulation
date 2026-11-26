@@ -82,7 +82,7 @@ export function computeVehicleSpecs() {
   const brakeMult = [0.92, 1.05, 1.18, 1.34][playerConfig.brakes] || 1.0;
   const brakeG = +(base.baseBrake * brakeMult * Math.min(1.18, tireGripMult)).toFixed(2);
 
-  const rideHeight = [0.025, 0.0, -0.025, -0.045][playerConfig.suspension] || 0;
+  const rideHeight = [0.0, -0.012, -0.024, -0.036][playerConfig.suspension] || 0;
   const rollStiff = [0.095, 0.058, 0.032, 0.025][playerConfig.suspension] || 0.05;
 
   const numGears = base.gears || 6;
@@ -223,7 +223,7 @@ export function sampleEngineCurve(rpm, redline, peakTorqueNm, peakHp, aspiration
 }
 
 /**
- * Maps every vehicle in the 12-brand / 19-car catalog to its unique
+ * Maps every vehicle in the catalog to its unique
  * real 3D .GLB vehicle model file.
  */
 export function pickRealGLBKey(carDef) {
@@ -250,7 +250,8 @@ const GLB_FORWARD_ROT_Y = {
   mclaren:        Math.PI,
   hatchback:      -Math.PI * 0.5,
   jeep_wrangler:  Math.PI,
-  xiaomi_yu7:     Math.PI
+  xiaomi_yu7:     Math.PI,
+  car_concept:    Math.PI
 };
 
 function createRadialGlowTexture() {
@@ -274,16 +275,19 @@ const rawBoundsCache = new Map();
  * and match the target vehicle's length while preserving realistic window & roof proportions.
  */
 function normalizeRealGLB(modelClone, glbKey, carDef, spacerOffset = 0) {
-  // Strip studio floors, flat baked shadow quads, fabric backdrops, and stray streetlamps embedded in third-party GLBs
+  // Strip studio floors, flat baked shadow quads, fabric backdrops, dangling badges, and streetlamp posts
   const toRemove = [];
   modelClone.traverse(n => {
+    const nm = n.name || '';
     if (
-      n.name === 'Ground' ||
-      n.name === 'Fabric' ||
-      n.name === 'Plane.007_28' ||
-      n.name === 'Plane.015_62' ||
-      n.name === 'Object_140' ||
-      (n.name && n.name.startsWith('LanternGlass'))
+      nm === 'Ground' ||
+      nm === 'Fabric' ||
+      nm === 'Plane.007_28' ||
+      nm === 'Plane.015_62' ||
+      nm === 'Object_140' ||
+      nm.startsWith('LanternGlass') ||
+      (glbKey === 'porsche_930' && (nm === 'Cylinder.002_32' || nm === 'Cylinder.006_20')) ||
+      (glbKey === 'gtr' && nm === 'GTR.029')
     ) {
       toRemove.push(n);
     }
@@ -303,8 +307,8 @@ function normalizeRealGLB(modelClone, glbKey, carDef, spacerOffset = 0) {
   let cached = rawBoundsCache.get(glbKey);
   if (!cached) {
     wrapper.updateMatrixWorld(true);
-    const needPrecise = (glbKey === 'muscle' || glbKey === 'hatchback');
-    const box = new THREE.Box3().setFromObject(wrapper, needPrecise);
+    // Measure precise mesh/tire vertices once per GLB so rotated round tires sit flush with zero air gap
+    const box = new THREE.Box3().setFromObject(wrapper, true);
     const size = new THREE.Vector3();
     box.getSize(size);
 
@@ -314,15 +318,30 @@ function normalizeRealGLB(modelClone, glbKey, carDef, spacerOffset = 0) {
       extraRotY = Math.PI * 0.5;
       inner.rotation.y = rotY + extraRotY;
       wrapper.updateMatrixWorld(true);
-      box.setFromObject(wrapper, needPrecise);
+      box.setFromObject(wrapper, true);
       box.getSize(size);
     }
+
+    const rawSteerBox = new THREE.Box3();
+    modelClone.traverse(n => {
+      if (!n.isMesh) return;
+      const mName = Array.isArray(n.material)
+        ? n.material.map(m => (m && m.name) || '').join(' ')
+        : ((n.material && n.material.name) || '');
+      const tag = ((n.name || '') + ' ' + mName).toLowerCase();
+      if (/steer|volant/.test(tag)) {
+        rawSteerBox.expandByObject(n, true);
+      }
+    });
 
     cached = {
       extraRotY,
       rawMin: box.min.clone(),
       rawMax: box.max.clone(),
-      rawSize: size.clone()
+      rawSize: size.clone(),
+      hasSteer: !rawSteerBox.isEmpty(),
+      rawSteerMin: rawSteerBox.isEmpty() ? null : rawSteerBox.min.clone(),
+      rawSteerMax: rawSteerBox.isEmpty() ? null : rawSteerBox.max.clone()
     };
     rawBoundsCache.set(glbKey, cached);
   } else {
@@ -334,14 +353,14 @@ function normalizeRealGLB(modelClone, glbKey, carDef, spacerOffset = 0) {
   const uniformScale = targetLen / Math.max(cached.rawSize.z, 1e-6);
 
   // Subtle proportion tailoring (e.g. compact hatchback vs long wagon vs wide track)
-  let heightAdjust = 1.0;
-  let widthAdjust = 1.0 + (spacerOffset * 0.35);
-  if (glbKey === 'suv_q7') {
+  let heightAdjust = carDef.heightScale || 1.0;
+  let widthAdjust = (carDef.widthScale || 1.0) + (spacerOffset * 0.35);
+  if (glbKey === 'suv_q7' && !carDef.heightScale) {
     if (carDef.chassis === 'hatch') {
-      heightAdjust = 0.92;
+      heightAdjust = 0.85;
       widthAdjust *= 0.94;
     } else if (carDef.chassis === 'wagon') {
-      heightAdjust = 0.86;
+      heightAdjust = 0.83;
     }
   }
 
@@ -370,7 +389,23 @@ function normalizeRealGLB(modelClone, glbKey, carDef, spacerOffset = 0) {
     cached.rawSize.z * sz
   );
 
-  return { group: wrapper, size: finalSize };
+  let steerBox = null;
+  if (cached.hasSteer && cached.rawSteerMin && cached.rawSteerMax) {
+    steerBox = new THREE.Box3(
+      new THREE.Vector3(
+        cached.rawSteerMin.x * sx + scaleGroup.position.x,
+        cached.rawSteerMin.y * sy + scaleGroup.position.y,
+        cached.rawSteerMin.z * sz + scaleGroup.position.z
+      ),
+      new THREE.Vector3(
+        cached.rawSteerMax.x * sx + scaleGroup.position.x,
+        cached.rawSteerMax.y * sy + scaleGroup.position.y,
+        cached.rawSteerMax.z * sz + scaleGroup.position.z
+      )
+    );
+  }
+
+  return { group: wrapper, size: finalSize, steerBox };
 }
 
 /**
@@ -390,6 +425,10 @@ function applyCustomMaterialsToGLB(modelClone, glbKey, mats, twoTone, castShadow
       const mName = ((origMat && origMat.name) || '').toLowerCase();
 
       // 1. Primary Body Paint
+      if (mName.startsWith('paint 2')) {
+        return twoTone ? accentMat : bodyMat;
+      }
+
       const isPaint =
         nName === 'body' ||
         mName === 'body_color' ||
@@ -400,6 +439,7 @@ function applyCustomMaterialsToGLB(modelClone, glbKey, mats, twoTone, castShadow
         mName === 'mat8' ||
         mName === 'sennapaint' ||
         mName === 'sennapaintmain' ||
+        mName.startsWith('paint 1') ||
         (glbKey === 'suv_q7' && mName === 'material') ||
         (glbKey === 'jeep_wrangler' && mName === 'material') ||
         (glbKey === 'xiaomi_yu7' && mName === 'carpaint') ||
@@ -426,10 +466,14 @@ function applyCustomMaterialsToGLB(modelClone, glbKey, mats, twoTone, castShadow
          mName === 'window_glass' ||
          mName === 'vidiro' ||
          mName === 'vidrio2' ||
+         mName === 'vidrionegro' ||
          mName === 'mat17' ||
          mName === 'senna_glass' ||
          mName === 'windows' ||
          mName === 'd_glass' ||
+         mName === 'マテリアル.037' ||
+         mName === 'マテリアル.653' ||
+         mName.includes('untitledmat_glass') ||
          mName.includes('window_material') ||
          mName.includes('mmat_glass') ||
          mName.includes('twixer_992_glass.002')) &&
@@ -451,6 +495,8 @@ function applyCustomMaterialsToGLB(modelClone, glbKey, mats, twoTone, castShadow
         mName === 'q7rin' ||
         mName === 'mat22' ||
         mName === 'alum' ||
+        mName === 'rim1' ||
+        mName === 'rim2' ||
         mName.includes('jmi_rim') ||
         mName.includes('3dwheel1a') ||
         mName.includes('wheels_chrome') ||
@@ -464,6 +510,7 @@ function applyCustomMaterialsToGLB(modelClone, glbKey, mats, twoTone, castShadow
       const isCaliper =
         nName === 'brake' ||
         nName === 'brakes' ||
+        mName === 'brake' ||
         mName === 'caliper' ||
         mName === 'calip_1' ||
         mName === 'calip_2' ||
@@ -536,6 +583,12 @@ export function createVehicleManager(scene, assets) {
   let playerBrakeLightMat = null;
   let playerSteeringWheel = null;
   let zpdLightbarMeshes = [];
+  let playerGlassMat = null;
+  let playerBaseGlassOpacity = 0.68;
+  let playerCamAnchors = {
+    hood: { x: 0, y: 1.28, z: -0.95, lookY: 1.10 },
+    cockpit: { x: -0.35, y: 1.12, z: -0.05, lookY: 1.01 }
+  };
 
   function makeBodyPaintMat(hexColor, finish) {
     if (finish === 'carbon') return matCarbon;
@@ -644,6 +697,11 @@ export function createVehicleManager(scene, assets) {
     let sourceGLB = assets.models[glbKey];
     let pending = null;
 
+    let carSize = new THREE.Vector3(carDef.width || 1.92, 1.38, carDef.length || 4.55);
+    let steerBox = null;
+    const settleY = -0.008;
+    const yOffset = (useStock ? 0 : rh) + settleY;
+
     if (!sourceGLB) {
       if (assets.ensureGLBModel && !(assets.isGLBFailed && assets.isGLBFailed(glbKey))) {
         pending = assets.ensureGLBModel(glbKey);
@@ -656,13 +714,12 @@ export function createVehicleManager(scene, assets) {
           });
         }
         if (!castShadow) {
-          return { group: root, root, pending, wheels, frontSteer, steeringWheel, brakeMat, flames: [], lightbarPair: [] };
+          return { group: root, root, pending, wheels, frontSteer, steeringWheel, brakeMat, glassMat, carSize, glbKey, steerBox, yOffset, flames: [], lightbarPair: [] };
         }
       }
       sourceGLB = assets.models.sedan || assets.models.ferrari;
     }
 
-    let carSize = new THREE.Vector3(carDef.width || 1.92, 1.38, carDef.length || 4.55);
     const camberRad = (cfg.camberDeg * Math.PI) / 180;
 
     if (sourceGLB) {
@@ -677,7 +734,8 @@ export function createVehicleManager(scene, assets) {
 
       const norm = normalizeRealGLB(modelClone, glbKey, carDef, cfg.spacerOffset);
       carSize = norm.size;
-      norm.group.position.y = rh;
+      steerBox = norm.steerBox;
+      norm.group.position.y = yOffset;
       root.add(norm.group);
 
       // Hook up wheel & steering nodes if present on the GLB
@@ -700,9 +758,8 @@ export function createVehicleManager(scene, assets) {
 
     // ---- OPTIONAL CUSTOM REAR AERO WING (Only when explicitly added by player!) ----
     const activeWing = cfg.spoiler;
-    const deckY = (carDef.chassis === 'hatch' || carDef.chassis === 'wagon' || carDef.chassis === 'suv')
-      ? carSize.y * 0.94
-      : carSize.y * 0.68;
+    const isHighDeckGLB = (glbKey === 'suv_q7' || glbKey === 'g63' || glbKey === 'jeep_wrangler' || glbKey === 'xiaomi_yu7');
+    const deckY = isHighDeckGLB ? carSize.y * 0.94 : carSize.y * 0.68;
 
     if (activeWing === 'lip') {
       const lip = new THREE.Mesh(new THREE.BoxGeometry(carSize.x * 0.72, 0.03, 0.08), matCarbon);
@@ -780,6 +837,7 @@ export function createVehicleManager(scene, assets) {
       );
       aoPlane.rotation.x = -Math.PI / 2;
       aoPlane.position.y = 0.012;
+      aoPlane.userData.isRayIgnore = true;
       root.add(aoPlane);
     }
 
@@ -799,6 +857,7 @@ export function createVehicleManager(scene, assets) {
       );
       ugPlane.rotation.x = -Math.PI / 2;
       ugPlane.position.y = 0.02;
+      ugPlane.userData.isRayIgnore = true;
       root.add(ugPlane);
     }
 
@@ -813,8 +872,9 @@ export function createVehicleManager(scene, assets) {
     [-0.40, 0.40].forEach(ex => {
       const fl = new THREE.Mesh(new THREE.ConeGeometry(0.08, 1.10, 10), flameMat);
       fl.rotation.x = Math.PI / 2;
-      fl.position.set(ex, 0.22 + rh, rearZ + 0.46);
+      fl.position.set(ex, 0.22 + yOffset, rearZ + 0.46);
       fl.visible = false;
+      fl.userData.isRayIgnore = true;
       root.add(fl);
       flames.push(fl);
     });
@@ -827,6 +887,11 @@ export function createVehicleManager(scene, assets) {
       frontSteer,
       steeringWheel,
       brakeMat,
+      glassMat,
+      carSize,
+      glbKey,
+      steerBox,
+      yOffset,
       flames,
       lightbarPair
     };
@@ -843,11 +908,91 @@ export function createVehicleManager(scene, assets) {
     playerBrakeLightMat = built.brakeMat;
     playerSteeringWheel = built.steeringWheel;
     zpdLightbarMeshes = built.lightbarPair;
+    playerGlassMat = built.glassMat || null;
+    playerBaseGlassOpacity = playerGlassMat ? playerGlassMat.opacity : 0.68;
+
+    // Dynamic Hood & Raycast-Verified Cockpit (Driver Seat) Camera Anchors
+    const W = built.carSize ? built.carSize.x : 1.96;
+    const H = built.carSize ? built.carSize.y : 1.38;
+    const L = built.carSize ? built.carSize.z : 4.55;
+    const yOff = built.yOffset || 0;
+    const sb = built.steerBox;
+
+    const hoodAnchor = {
+      x: 0,
+      y: H * 0.72 + 0.14 + yOff,
+      z: -L * 0.28,
+      lookY: H * 0.64 + yOff
+    };
+
+    let seatX = (built.glbKey === 'gtr' ? 1 : -1) * W * 0.17;
+    if (sb && Math.abs((sb.min.x + sb.max.x) * 0.5) > 0.08) {
+      seatX = (sb.min.x + sb.max.x) * 0.5;
+    }
+    let seatY = H * 0.79 + yOff;
+    if (sb) {
+      seatY = Math.min(H * 0.86 + yOff, Math.max(sb.max.y + yOff + 0.18, H * 0.79 + yOff));
+    }
+    let seatZ = -L * 0.05;
+    if (sb) {
+      seatZ = Math.min(sb.max.z + 0.22, 0.04);
+    }
+
+    built.root.updateMatrixWorld(true);
+    const rayMeshes = [];
+    built.root.traverse(n => {
+      if (n.isMesh && n.visible && !n.userData.isRayIgnore) rayMeshes.push(n);
+    });
+    const rc = new THREE.Raycaster();
+    const rayDir = new THREE.Vector3(0, -0.025, -1).normalize();
+    const isOpaqueHit = hit => {
+      const m = Array.isArray(hit.object.material)
+        ? hit.object.material[hit.face ? hit.face.materialIndex : 0]
+        : hit.object.material;
+      if (!m || m === built.glassMat) return false;
+      if (m.transparent && m.opacity < 0.85) return false;
+      return true;
+    };
+
+    for (let step = 0; step < 6; step++) {
+      rc.set(new THREE.Vector3(seatX, seatY, seatZ), rayDir);
+      rc.far = L * 0.45;
+      const hits = rc.intersectObjects(rayMeshes, false).filter(isOpaqueHit);
+      if (hits.length === 0) break;
+      if (step < 2 && seatY < H * 0.87 + yOff) {
+        seatY += 0.05;
+      } else {
+        seatZ -= 0.11;
+      }
+      if (seatZ < -L * 0.25) {
+        seatZ = -L * 0.22;
+        seatY = Math.max(seatY, H * 0.82 + yOff);
+        break;
+      }
+    }
+
+    playerCamAnchors = {
+      hood: hoodAnchor,
+      cockpit: { x: seatX, y: seatY, z: seatZ, lookY: seatY - 0.11 }
+    };
   }
 
-  // Diverse Real 3D .GLB Traffic Fleet (SUVs, Sedans, Coupes, Muscle Cars, Supercars!)
+  function getPlayerCamAnchors() {
+    return playerCamAnchors;
+  }
+
+  function setCockpitGlassMode(inCockpit) {
+    if (!playerGlassMat) return;
+    const target = inCockpit ? 0.10 : playerBaseGlassOpacity;
+    if (Math.abs(playerGlassMat.opacity - target) > 0.01) {
+      playerGlassMat.opacity = target;
+      playerGlassMat.depthWrite = false;
+    }
+  }
+
+  // Diverse Real 3D .GLB Traffic Fleet (High-detail PBR models only)
   const trafficAgents = [];
-  const trafficPoolKeys = ['muscle', 'ferrari', 'bmwm5', 'porsche_718'];
+  const trafficPoolKeys = ['ferrari', 'bmwm5', 'porsche_718', 'porsche_turbos'];
   const trafficColors = ['#dc2626', '#0284c7', '#f59e0b', '#16a34a', '#f8fafc', '#334155', '#7c3aed', '#e11d48'];
 
   function spawnTrafficFleet(loopLen) {
@@ -900,9 +1045,12 @@ export function createVehicleManager(scene, assets) {
     const catalogEntry = CAR_CATALOG.find(c => c.glbKey === glbKey);
     const spec = {
       length: catalogEntry ? catalogEntry.length : 4.65,
-      chassis: catalogEntry ? catalogEntry.chassis : 'sedan'
+      chassis: catalogEntry ? catalogEntry.chassis : 'sedan',
+      widthScale: catalogEntry ? catalogEntry.widthScale : 1.0,
+      heightScale: catalogEntry ? catalogEntry.heightScale : 1.0
     };
     const norm = normalizeRealGLB(clone, glbKey, spec, 0);
+    norm.group.position.y = -0.008;
     root.add(norm.group);
 
     if (dir < 0) root.rotation.y = Math.PI;
@@ -964,6 +1112,8 @@ export function createVehicleManager(scene, assets) {
     trafficAgents,
     buildCarModel,
     rebuildPlayerCar,
+    getPlayerCamAnchors,
+    setCockpitGlassMode,
     spawnTrafficFleet,
     updatePlayerVisuals
   };

@@ -44,7 +44,7 @@ import { createShowroom } from './showroom.js';
   scene.background = new THREE.Color(0x182334);
   scene.fog = new THREE.FogExp2(0x182334, 0.0018);
 
-  const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 480);
+  const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.06, 480);
   const rearMirrorCam = new THREE.PerspectiveCamera(54, 2.7, 0.2, 110);
   const leftMirrorCam = new THREE.PerspectiveCamera(52, 1.55, 0.2, 95);
   const rightMirrorCam = new THREE.PerspectiveCamera(52, 1.55, 0.2, 95);
@@ -129,16 +129,39 @@ import { createShowroom } from './showroom.js';
   if (loadingScreenEl) loadingScreenEl.classList.add('hidden');
 
   // ============================================================================
-  // 12-BRAND 3D SPINNING PLATFORM SHOWROOM UI
+  // 20-BRAND / 127-CAR 3D SPINNING PLATFORM SHOWROOM + ICON DROPDOWN PICKER
   // ============================================================================
   let activeBrandFilter = 'All';
   let showroomRoster = CAR_CATALOG;
   let showroomIndex = 0;
+  let carDropdownOpen = false;
 
   const brandPillsEl = document.getElementById('brand-pills');
   const dynoCanvas = document.getElementById('dyno-canvas');
   const dynoCtx = dynoCanvas ? dynoCanvas.getContext('2d') : null;
   const srCounterEl = document.getElementById('sr-counter');
+  const btnCarDropdown = document.getElementById('btn-car-dropdown');
+  const carDropdownPanel = document.getElementById('car-dropdown-panel');
+  const carDdSearchEl = document.getElementById('car-dd-search');
+  const carDdCountEl = document.getElementById('car-dd-count');
+  const carDdListEl = document.getElementById('car-dd-list');
+  const srCarIdBtn = document.getElementById('sr-car-id-btn');
+
+  function getChassisSvgIcon(chassis, color) {
+    const c = color || '#38bdf8';
+    const bodies = {
+      suv:    '<path d="M5 20v-4l4-7h25l8 5 15 1.5c1.5.2 2.5 1.3 2.5 2.7V20h-5a5 5 0 0 1-10 0H21a5 5 0 0 1-10 0z" fill="' + c + '"/><path d="M12 10h20l6 4H10z" fill="#0b1220" opacity=".78"/>',
+      hatch:  '<path d="M7 20v-4l3-7h18l10 5 16 2c1.8.3 2.5 1.3 2.5 2.5V20h-5a5 5 0 0 1-10 0H22a5 5 0 0 1-10 0z" fill="' + c + '"/><path d="M12 10h14l7 4H10z" fill="#0b1220" opacity=".78"/>',
+      wagon:  '<path d="M5 20v-4l3-7h26l8 5 15 2c1.8.3 2.5 1.3 2.5 2.5V20h-5a5 5 0 0 1-10 0H21a5 5 0 0 1-10 0z" fill="' + c + '"/><path d="M10 10h22l7 4H9z" fill="#0b1220" opacity=".78"/>',
+      saloon: '<path d="M5 20v-3.5l6-4.5 9-3.5h15l10 4 13 2c1.8.4 2.5 1.3 2.5 2.5V20h-5a5 5 0 0 1-10 0H21a5 5 0 0 1-10 0z" fill="' + c + '"/><path d="M19 9.5h14l8 3.5H14z" fill="#0b1220" opacity=".78"/>',
+      sedan:  '<path d="M6 20v-3.5l5-4.5 9-3.5h14l9 4 14 2c1.8.4 2.5 1.3 2.5 2.5V20h-5a5 5 0 0 1-10 0H21a5 5 0 0 1-10 0z" fill="' + c + '"/><path d="M19 9.5h13l7 3.5H14z" fill="#0b1220" opacity=".78"/>',
+      coupe:  '<path d="M6 20v-3l6-4 9-4h12l10 4.5 14 1.8c1.8.4 2.5 1.2 2.5 2.4V20h-5a5 5 0 0 1-10 0H21a5 5 0 0 1-10 0z" fill="' + c + '"/><path d="M19 10h12l8 3.5H15z" fill="#0b1220" opacity=".78"/>',
+      muscle: '<path d="M5 20v-4l4-3.5 10-4h13l9 4.5 16 1.2c1.8.3 2.5 1.3 2.5 2.5V20h-5a5 5 0 0 1-10 0H21a5 5 0 0 1-10 0z" fill="' + c + '"/><path d="M18 9.5h12l7 3.5H14z" fill="#0b1220" opacity=".78"/>',
+      exotic: '<path d="M5 20v-2.5l5-3 12-5h11l11 4.5 13 2.2c1.6.3 2.5 1.1 2.5 2.3V20h-5a5 5 0 0 1-10 0H21a5 5 0 0 1-10 0z" fill="' + c + '"/><path d="M21 10.5h10l8 3.5H16z" fill="#0b1220" opacity=".80"/>'
+    };
+    const path = bodies[chassis] || bodies.coupe;
+    return `<svg viewBox="0 0 64 28" xmlns="http://www.w3.org/2000/svg">${path}<circle cx="16" cy="20" r="4" fill="#1e293b" stroke="#e2e8f0" stroke-width="1.3"/><circle cx="48" cy="20" r="4" fill="#1e293b" stroke="#e2e8f0" stroke-width="1.3"/></svg>`;
+  }
 
   function syncPaintUI(color) {
     const customPaintEl = document.getElementById('custom-paint');
@@ -148,12 +171,126 @@ import { createShowroom } from './showroom.js';
     });
   }
 
+  function syncConfigChipUI(key, val) {
+    document.querySelectorAll(`.chip-row[data-config="${key}"] .mod-chip`).forEach(ch => {
+      ch.classList.toggle('active', ch.dataset.val === val);
+    });
+    document.querySelectorAll(`.dot-row[data-config="${key}"] .dot-chip`).forEach(ch => {
+      ch.classList.toggle('active', ch.dataset.val === val);
+    });
+  }
+
   function applyCarDefSelection(c) {
     if (!c) return;
     playerConfig.carId = c.id;
     playerConfig.paint = c.defaultColor;
+    playerConfig.spoiler = c.defaultSpoiler || 'none';
+    playerConfig.rims = c.defaultRims || 'silver';
+    playerConfig.finish = c.defaultFinish || 'gloss';
     syncPaintUI(c.defaultColor);
+    syncConfigChipUI('spoiler', playerConfig.spoiler);
+    syncConfigChipUI('rims', playerConfig.rims);
+    syncConfigChipUI('finish', playerConfig.finish);
   }
+
+  function renderCarDropdownList(query = '') {
+    if (!carDdListEl) return;
+    const q = query.trim().toLowerCase();
+    const baseList = q ? CAR_CATALOG : (activeBrandFilter === 'All' ? CAR_CATALOG : showroomRoster);
+    const items = q
+      ? baseList.filter(c =>
+          (`${c.brand} ${c.name} ${c.engineCode} ${c.chassis} ${c.aspiration}`).toLowerCase().includes(q)
+        )
+      : baseList;
+
+    if (carDdCountEl) carDdCountEl.textContent = `${items.length} cars`;
+    carDdListEl.innerHTML = '';
+
+    if (!items.length) {
+      const empty = document.createElement('div');
+      empty.className = 'car-dd-sub';
+      empty.style.padding = '12px';
+      empty.textContent = 'No matching cars — try RS6, G63, Civic, Supra, X5...';
+      carDdListEl.appendChild(empty);
+      return;
+    }
+
+    const frag = document.createDocumentFragment();
+    items.forEach(c => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'car-dd-item' + (c.id === playerConfig.carId ? ' active' : '');
+      const aspShort = c.aspiration === 'NA' ? 'NA' : (c.aspiration === 'SUPERCHARGED' ? 'SC' : (c.aspiration === 'TWIN-TURBO' ? 'TT' : 'TURBO'));
+      btn.innerHTML =
+        `<span class="car-dd-icon">${getChassisSvgIcon(c.chassis, c.defaultColor)}</span>` +
+        `<span class="car-dd-meta">` +
+          `<span class="car-dd-name">${c.brand} ${c.name}</span>` +
+          `<span class="car-dd-sub">${c.chassis.toUpperCase()} · ${c.drivetrain} · ${aspShort} · ${c.engineCode}</span>` +
+        `</span>` +
+        `<span class="car-dd-hp">${c.hp} HP</span>`;
+      btn.addEventListener('click', () => {
+        let idx = showroomRoster.findIndex(x => x.id === c.id);
+        if (idx < 0) {
+          activeBrandFilter = 'All';
+          showroomRoster = CAR_CATALOG;
+          renderBrandPills();
+          idx = showroomRoster.findIndex(x => x.id === c.id);
+          showroomIndex = Math.max(0, idx);
+          applyCarDefSelection(showroomRoster[showroomIndex]);
+          playerCarDirty = true;
+          showroom.setRoster(showroomRoster, showroomIndex);
+          updateGarageStatsAndDynoUI();
+        } else {
+          selectShowroomIndex(idx);
+        }
+        setCarDropdownOpen(false);
+      });
+      frag.appendChild(btn);
+    });
+    carDdListEl.appendChild(frag);
+  }
+
+  function setCarDropdownOpen(open) {
+    carDropdownOpen = !!open;
+    if (carDropdownPanel) carDropdownPanel.classList.toggle('hidden', !carDropdownOpen);
+    if (carDropdownOpen) {
+      setDrawerOpen(false);
+      renderCarDropdownList(carDdSearchEl ? carDdSearchEl.value : '');
+      if (carDdSearchEl) {
+        setTimeout(() => carDdSearchEl.focus(), 20);
+      }
+    }
+  }
+
+  if (btnCarDropdown) {
+    btnCarDropdown.addEventListener('click', e => {
+      e.stopPropagation();
+      setCarDropdownOpen(!carDropdownOpen);
+    });
+  }
+  if (srCarIdBtn) {
+    srCarIdBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      setCarDropdownOpen(!carDropdownOpen);
+    });
+  }
+  if (carDdSearchEl) {
+    carDdSearchEl.addEventListener('input', e => {
+      renderCarDropdownList(e.target.value);
+    });
+  }
+  window.addEventListener('pointerdown', e => {
+    if (!carDropdownOpen || !carDropdownPanel) return;
+    const t = e.target;
+    if (
+      carDropdownPanel.contains(t) ||
+      (btnCarDropdown && btnCarDropdown.contains(t)) ||
+      (srCarIdBtn && srCarIdBtn.contains(t))
+    ) {
+      return;
+    }
+    setCarDropdownOpen(false);
+  });
 
   function selectShowroomIndex(nextIdx) {
     if (!showroomRoster.length) return;
@@ -188,6 +325,7 @@ import { createShowroom } from './showroom.js';
         showroom.setRoster(showroomRoster, showroomIndex);
         renderBrandPills();
         updateGarageStatsAndDynoUI();
+        if (carDropdownOpen) renderCarDropdownList(carDdSearchEl ? carDdSearchEl.value : '');
       });
       brandPillsEl.appendChild(btn);
     });
@@ -465,6 +603,7 @@ import { createShowroom } from './showroom.js';
 
   function setDrawerOpen(open) {
     drawerOpen = !!open;
+    if (drawerOpen && carDropdownOpen) setCarDropdownOpen(false);
     if (customDrawer) customDrawer.classList.toggle('open', drawerOpen);
     if (showroomUi) showroomUi.classList.toggle('drawer-open', drawerOpen);
     if (btnToggleCustom) btnToggleCustom.classList.toggle('active', drawerOpen);
@@ -493,7 +632,10 @@ import { createShowroom } from './showroom.js';
     bottomHud.classList.toggle('garage-hidden', next === 'garage');
     mirrorsLayer.classList.toggle('hidden', !mirrorsEnabled || next !== 'playing');
     syncMobileControls();
-    if (next !== 'garage') setDrawerOpen(false);
+    if (next !== 'garage') {
+      setDrawerOpen(false);
+      setCarDropdownOpen(false);
+    }
     if (next === 'paused') {
       document.getElementById('pause-stats').textContent =
         `Score: ${scoreState.total.toLocaleString()} · Overtakes: ${scoreState.overtakes} · Best: ${scoreState.bestGrade}`;
@@ -655,6 +797,15 @@ import { createShowroom } from './showroom.js';
   const btnCam = document.getElementById('btn-cam');
 
   window.addEventListener('keydown', e => {
+    const activeTag = document.activeElement ? document.activeElement.tagName : '';
+    if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') {
+      if (e.code === 'Escape') {
+        setCarDropdownOpen(false);
+        document.activeElement.blur();
+      }
+      return;
+    }
+
     keys[e.code] = true;
     if (gameState === 'garage') {
       if (e.code === 'ArrowLeft') {
@@ -666,7 +817,8 @@ import { createShowroom } from './showroom.js';
         stepShowroom(1);
         return;
       } else if (e.code === 'Escape') {
-        if (drawerOpen) setDrawerOpen(false);
+        if (carDropdownOpen) setCarDropdownOpen(false);
+        else if (drawerOpen) setDrawerOpen(false);
         else setGameState('playing');
         return;
       }
@@ -1016,10 +1168,14 @@ import { createShowroom } from './showroom.js';
       const activeGearIdx = Math.max(0, Math.min(specs.numGears - 1, (phys.gear || 1) - 1));
       const curGearRatio = phys.gear === 0 ? 3.4 : specs.gearRatios[activeGearIdx];
       const topGearRatio = specs.gearRatios[specs.numGears - 1];
+      const isTopGear = phys.gear >= specs.numGears;
 
-      // Max vehicle speed achievable in the current gear at redline -> true wheel-referred RPM (0 at standstill)
-      const gearMaxSpeedMs = Math.max(11, specs.maxSpeedMs * (topGearRatio / curGearRatio));
-      const wheelCoupledRpm = (spdAbs / gearMaxSpeedMs) * specs.redline;
+      // Strict per-gear mechanical top-speed lock at redline (lower gears hard-lock speed until upshifted)
+      const baseGearMaxMs = Math.max(11, specs.maxSpeedMs * (topGearRatio / curGearRatio));
+      const gearMaxSpeedMs = (phys.gear >= 1)
+        ? (isTopGear ? baseGearMaxMs * (wantNos ? 1.08 : 1.0) : baseGearMaxMs)
+        : 16.0;
+      const wheelCoupledRpm = (spdAbs / baseGearMaxMs) * specs.redline;
 
       // Automatic (AT) vs Manual Sequential (MT) Gear Shifting Logic (throttle-sensitive shift points)
       if (playerConfig.transmission === 'AT') {
@@ -1041,7 +1197,10 @@ import { createShowroom } from './showroom.js';
       let hitRevLimiter = false;
       const effectiveThrottle = (phys.shiftCutTimer > 0) ? 0 : throttle;
 
-      if (effectiveThrottle > 0) {
+      if (phys.gear >= 1 && phys.vs >= gearMaxSpeedMs * 0.995) {
+        hitRevLimiter = true;
+        phys.rpm = specs.redline - (Math.sin(elapsed * 62) > 0 ? 160 : 0);
+      } else if (effectiveThrottle > 0) {
         const converterCeiling = (phys.gear <= 1 || brake)
           ? specs.launchStallRpm
           : (playerConfig.transmission === 'AT'
@@ -1050,7 +1209,7 @@ import { createShowroom } from './showroom.js';
         const slipCeiling = Math.max(wheelCoupledRpm, converterCeiling);
         if (wheelCoupledRpm >= specs.redline) {
           hitRevLimiter = true;
-          phys.rpm = specs.redline - (Math.sin(elapsed * 58) > 0 ? 150 : 0);
+          phys.rpm = specs.redline - (Math.sin(elapsed * 62) > 0 ? 160 : 0);
         } else if (phys.rpm < slipCeiling) {
           phys.rpm = Math.min(specs.redline, phys.rpm + specs.revUpRate * effectiveThrottle * dt);
           if (wheelCoupledRpm > phys.rpm) phys.rpm = wheelCoupledRpm;
@@ -1143,8 +1302,17 @@ import { createShowroom } from './showroom.js';
 
       const signedDrive = phys.gear === 0 ? -cappedDriveForce * 0.5 : cappedDriveForce;
       const netAccel = (signedDrive - aeroDrag - rolling - engineDrag - brakeForce) / specs.base.mass;
-      let nextVs = Math.min(specs.maxSpeedMs * (wantNos ? 1.12 : 1.0), phys.vs + netAccel * dt);
-      if (brake && phys.gear > 0 && phys.vs >= 0 && nextVs < 0) nextVs = 0;
+      let nextVs = phys.vs + netAccel * dt;
+      if (phys.gear >= 1) {
+        if (phys.vs > gearMaxSpeedMs + 0.15) {
+          const overRevDecel = Math.max(18.0, (phys.vs - gearMaxSpeedMs) * 9.5);
+          nextVs = Math.max(gearMaxSpeedMs, phys.vs - overRevDecel * dt);
+          phys.rpm = specs.redline;
+        } else {
+          nextVs = Math.min(gearMaxSpeedMs, nextVs);
+        }
+        if (brake && phys.vs >= 0 && nextVs < 0) nextVs = 0;
+      }
       phys.vs = nextVs;
       if (!throttle && !brake && Math.abs(phys.vs) < 0.2) phys.vs = 0;
 
@@ -1305,19 +1473,25 @@ import { createShowroom } from './showroom.js';
       camera.updateProjectionMatrix();
     }
 
-    if (CAM_MODES[camModeIdx] === 'Orbit') {
+    const activeCamMode = CAM_MODES[camModeIdx];
+    vehicles.setCockpitGlassMode(activeCamMode === 'Cockpit');
+    const camAnchors = vehicles.getPlayerCamAnchors();
+
+    if (activeCamMode === 'Orbit') {
       const dist = orbitDist;
       const cx = phys.x + Math.sin(orbitYaw) * Math.cos(orbitPitch) * dist;
       const cy = 0.82 + Math.sin(orbitPitch) * dist;
       const cz = Math.cos(orbitYaw) * Math.cos(orbitPitch) * dist;
       camera.position.set(cx, cy, cz);
       camera.lookAt(phys.x, 0.68, 0);
-    } else if (CAM_MODES[camModeIdx] === 'Hood') {
-      camera.position.set(phys.x + sx * 0.3, 1.24 + sy * 0.3, -0.42);
-      camera.lookAt(phys.x - phys.heading * 14, 1.05, -24);
-    } else if (CAM_MODES[camModeIdx] === 'Cockpit') {
-      camera.position.set(phys.x - 0.35 + sx * 0.2, 1.08 + sy * 0.2, 0.18);
-      camera.lookAt(phys.x - 0.35 - phys.heading * 12, 0.98, -22);
+    } else if (activeCamMode === 'Hood') {
+      const h = camAnchors.hood;
+      camera.position.set(phys.x + h.x + sx * 0.25, h.y + sy * 0.25, h.z);
+      camera.lookAt(phys.x - phys.heading * 14, h.lookY - phys.pitch * 6, -24);
+    } else if (activeCamMode === 'Cockpit') {
+      const c = camAnchors.cockpit;
+      camera.position.set(phys.x + c.x + sx * 0.18, c.y + sy * 0.18, c.z);
+      camera.lookAt(phys.x + c.x - phys.heading * 12, c.lookY - phys.pitch * 6, -24);
     } else {
       _dp.set(phys.x + phys.heading * 2.6, 1.92, 5.35 + Math.min(1.35, speedKmh * 0.0045));
       camPosSmooth.lerp(_dp, Math.min(1, dt * 8.5));

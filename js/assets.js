@@ -22,7 +22,8 @@ const MODEL_URLS = {
   mclaren:        './assets/models/mclaren.glb',
   hatchback:      './assets/models/hatchback.glb',
   jeep_wrangler:  './assets/models/jeep_wrangler.glb',
-  xiaomi_yu7:     './assets/models/xiaomi_yu7.glb'
+  xiaomi_yu7:     './assets/models/xiaomi_yu7.glb',
+  car_concept:    './assets/models/CarConcept.glb'
 };
 
 export async function loadAllAssets(renderer, onProgress) {
@@ -42,7 +43,7 @@ export async function loadAllAssets(renderer, onProgress) {
   const failedLoads = new Set();
 
   // Boot items: 1 HDR + 3 textures + 3 lightweight core chassis (~2.7 MB total)
-  const bootKeys = ['ferrari', 'bmwm5', 'muscle'];
+  const bootKeys = ['ferrari', 'bmwm5', 'porsche_718'];
   const progressItems = ['hdr', 'ao', 'carbonC', 'carbonN', ...bootKeys.map(k => `glb_${k}`)];
   const progressMap = Object.fromEntries(progressItems.map(id => [id, 0]));
   let lastLabel = 'Initializing 3D Showroom...';

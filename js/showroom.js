@@ -1,7 +1,7 @@
 import * as THREE from '../vendor/three.module.js';
 
-// 3D showroom: every car sits on its own turntable platform in a row.
-// The camera glides between platforms; the focused car spins on its own.
+// 3D showroom: virtualized 3-platform turntable pool so even 120+ cars cause zero lag.
+// Only the centered platform mounts the active 3D car; side platforms frame the view.
 const SPACING = 7.6;
 
 export function createShowroom(assets, vehicles) {
@@ -12,8 +12,7 @@ export function createShowroom(assets, vehicles) {
 
   const camera = new THREE.PerspectiveCamera(36, window.innerWidth / window.innerHeight, 0.1, 120);
 
-  // Lighting: soft fill + key light that follows the focused platform + coloured rim lights
-  // Disable shadow-map casting in showroom (uses fast contact shadow map instead of 2nd geometry pass)
+  // Soft studio fill + key light tracking focused platform + rim accents (no showroom shadow-map pass)
   scene.add(new THREE.HemisphereLight(0xcfe3ff, 0x0b0f17, 0.72));
   const key = new THREE.SpotLight(0xffffff, 65, 24, Math.PI / 5, 0.55, 1.4);
   key.castShadow = false;
@@ -22,7 +21,7 @@ export function createShowroom(assets, vehicles) {
   const rimR = new THREE.PointLight(0xf59e0b, 10, 12, 1.6);
   scene.add(rimL, rimR);
 
-  // Glossy studio floor
+  // Glossy studio floor (covers arbitrary roster length when virtualized around camX)
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(400, 80),
     new THREE.MeshStandardMaterial({ color: 0x121722, roughness: 0.38, metalness: 0.45 })
@@ -40,16 +39,14 @@ export function createShowroom(assets, vehicles) {
   let index = 0;
   let camX = 0;
   let drawerOpen = false;
-  const slots = [];
-  const modelCache = new Map(); // LRU cache of recently built showroom cars (max 5)
+  const modelCache = new Map(); // LRU cache of recently built showroom cars (max 4)
 
   let userSpinHold = 0;
   let dragging = false;
   let lastX = 0;
 
-  function makeSlot(i) {
+  function makeSlot() {
     const group = new THREE.Group();
-    group.position.x = i * SPACING;
     const plat = new THREE.Mesh(platGeo, platMat);
     plat.position.y = 0.11;
     const top = new THREE.Mesh(topGeo, topMat);
@@ -60,11 +57,14 @@ export function createShowroom(assets, vehicles) {
     ring.position.y = 0.2;
     const holder = new THREE.Group();
     holder.position.y = 0.24;
-    holder.rotation.y = -0.6 + i * 0.9;
+    holder.rotation.y = -0.6;
     group.add(plat, top, ring, holder);
     scene.add(group);
     return { group, holder, ringMat, car: null, carId: null, loading: false };
   }
+
+  // Fixed pool of 3 turntables: pool[0] = prev, pool[1] = active center, pool[2] = next
+  const pool = [makeSlot(), makeSlot(), makeSlot()];
 
   function clearSlotCar(slot) {
     if (slot.car) slot.holder.remove(slot.car);
@@ -84,7 +84,7 @@ export function createShowroom(assets, vehicles) {
     const res = vehicles.buildCarModel(def, null, false);
     if (!res.pending) {
       modelCache.set(cacheKey, res.group);
-      if (modelCache.size > 5) {
+      if (modelCache.size > 4) {
         const oldestKey = modelCache.keys().next().value;
         modelCache.delete(oldestKey);
       }
@@ -92,20 +92,24 @@ export function createShowroom(assets, vehicles) {
     return res;
   }
 
-  function buildSlotCar(i, force = false) {
-    const slot = slots[i];
-    const def = roster[i];
+  function buildCenterCar(force = false) {
+    const slot = pool[1];
+    const def = roster[index];
     if (!slot || !def) return;
     if (!force && slot.carId === def.id && !slot.loading) return;
 
+    const changedCar = slot.carId !== def.id;
     const res = getCachedOrBuildCar(def, force);
     clearSlotCar(slot);
+    if (changedCar) slot.holder.rotation.y = -0.6;
+
     if (res.pending) {
       slot.loading = true;
       slot.carId = def.id;
+      const targetIndex = index;
       res.pending.then(loaded => {
-        if (loaded && i === index && roster[i] && roster[i].id === def.id) {
-          buildSlotCar(i, true);
+        if (loaded && targetIndex === index && roster[index] && roster[index].id === def.id) {
+          buildCenterCar(true);
         } else if (slot.carId === def.id) {
           slot.loading = false;
         }
@@ -118,27 +122,42 @@ export function createShowroom(assets, vehicles) {
     }
   }
 
+  function syncVisibleCars() {
+    if (!roster.length) {
+      pool.forEach(s => {
+        clearSlotCar(s);
+        s.group.visible = false;
+      });
+      return;
+    }
+
+    pool[0].group.position.x = (index - 1) * SPACING;
+    pool[0].group.visible = index > 0;
+    clearSlotCar(pool[0]);
+
+    pool[1].group.position.x = index * SPACING;
+    pool[1].group.visible = true;
+    buildCenterCar(false);
+
+    pool[2].group.position.x = (index + 1) * SPACING;
+    pool[2].group.visible = index < roster.length - 1;
+    clearSlotCar(pool[2]);
+  }
+
   function setRoster(list, startIndex = 0) {
-    slots.forEach(s => scene.remove(s.group));
-    slots.length = 0;
     roster = list.slice();
-    for (let i = 0; i < roster.length; i++) slots.push(makeSlot(i));
     index = Math.max(0, Math.min(roster.length - 1, startIndex));
     camX = index * SPACING;
     syncVisibleCars();
   }
 
-  function syncVisibleCars() {
-    for (let i = 0; i < slots.length; i++) {
-      if (i === index) buildSlotCar(i);
-      else clearSlotCar(slots[i]);
-      slots[i].group.visible = Math.abs(i - index) <= 1;
-    }
-  }
-
   function setIndex(i) {
     if (!roster.length) return;
     index = (i + roster.length) % roster.length;
+    const targetX = index * SPACING;
+    if (Math.abs(targetX - camX) > SPACING * 2.5) {
+      camX = targetX - Math.sign(targetX - camX) * SPACING * 1.5;
+    }
     syncVisibleCars();
   }
 
@@ -146,12 +165,14 @@ export function createShowroom(assets, vehicles) {
   function refreshCurrent() {
     const def = roster[index];
     if (def) modelCache.delete(def.id);
-    buildSlotCar(index, true);
+    buildCenterCar(true);
   }
 
   function update(dt, t) {
     const targetX = index * SPACING;
     camX += (targetX - camX) * Math.min(1, dt * 7.5);
+    floor.position.x = camX;
+
     const lookShift = drawerOpen ? 1.45 : 0;
     camera.position.set(camX + lookShift + 0.55, 1.92, 7.5);
     camera.lookAt(camX + lookShift, 0.68, 0);
@@ -162,16 +183,15 @@ export function createShowroom(assets, vehicles) {
     rimR.position.set(camX + 4.5, 1.4, -2.5);
 
     userSpinHold = Math.max(0, userSpinHold - dt);
-    for (let i = 0; i < slots.length; i++) {
-      const s = slots[i];
-      if (!s.group.visible) continue;
-      const focus = i === index;
-      const targetEmissive = focus
-        ? (s.loading ? 1.8 + Math.sin(t * 8.0) * 1.4 : 2.6 + Math.sin(t * 2.4) * 0.5)
-        : 0.25;
-      s.ringMat.emissiveIntensity += (targetEmissive - s.ringMat.emissiveIntensity) * Math.min(1, dt * 8);
-      if (!(focus && userSpinHold > 0)) s.holder.rotation.y += dt * (focus ? 0.42 : 0.18);
-    }
+    const center = pool[1];
+    const targetEmissive = center.loading
+      ? 1.8 + Math.sin(t * 8.0) * 1.4
+      : 2.2 + Math.sin(t * 2.4) * 0.45;
+    center.ringMat.emissiveIntensity += (targetEmissive - center.ringMat.emissiveIntensity) * Math.min(1, dt * 8);
+    pool[0].ringMat.emissiveIntensity = 0.15;
+    pool[2].ringMat.emissiveIntensity = 0.15;
+
+    if (userSpinHold <= 0) center.holder.rotation.y += dt * 0.42;
   }
 
   let activePointerId = null;
@@ -183,11 +203,11 @@ export function createShowroom(assets, vehicles) {
     lastX = x;
   }
   function onPointerMove(xOrEvent, pointerId) {
-    if (!dragging || !slots[index]) return;
+    if (!dragging || !pool[1]) return;
     const pid = pointerId !== undefined ? pointerId : (typeof xOrEvent === 'object' && xOrEvent ? xOrEvent.pointerId : null);
     if (activePointerId !== null && pid != null && pid !== activePointerId) return;
     const x = typeof xOrEvent === 'number' ? xOrEvent : xOrEvent.clientX;
-    slots[index].holder.rotation.y += (x - lastX) * 0.012;
+    pool[1].holder.rotation.y += (x - lastX) * 0.012;
     lastX = x;
     userSpinHold = 2.5;
   }
