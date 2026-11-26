@@ -3,7 +3,9 @@ import * as THREE from '../vendor/three.module.js';
 export const NUM_BLOCKS = 12;
 export const BLOCK_LEN = 200;
 export const LOOP_LEN = NUM_BLOCKS * BLOCK_LEN; // 2,400m loop
-export const STREAM_RADIUS = 320;
+export const STREAM_AHEAD = 260;
+export const STREAM_BEHIND = 95;
+export const STREAM_RADIUS = STREAM_AHEAD;
 
 export const DISTRICTS = [
   { name: 'Sector 1 · Straightaway', color: '#38bdf8', start: 0, end: 3 },
@@ -193,7 +195,7 @@ g.add(inst);
     for (let i = 0; i < blockChunks.length; i++) {
       const ch = blockChunks[i];
       const dz = wrapDelta(ch.centerS, playerS);
-      ch.group.visible = Math.abs(dz) <= STREAM_RADIUS;
+      ch.group.visible = (dz >= -STREAM_BEHIND && dz <= STREAM_AHEAD);
       if (ch.group.visible) {
         ch.group.position.z = -dz;
       }

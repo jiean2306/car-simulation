@@ -6,6 +6,8 @@ import {
   BLOCK_LEN,
   LOOP_LEN,
   STREAM_RADIUS,
+  STREAM_AHEAD,
+  STREAM_BEHIND,
   DISTRICTS,
   mod,
   wrapDelta,
@@ -27,13 +29,11 @@ import { createShowroom } from './showroom.js';
   const container = document.getElementById('canvas-container');
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
-    powerPreference: 'high-performance'
+    powerPreference: 'default'
   });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isMobile ? 1.0 : 1.25));
+  renderer.setPixelRatio(1);
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.autoUpdate = false;
-  renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.shadowMap.enabled = false;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.96;
   renderer.autoClear = false;
@@ -45,26 +45,17 @@ import { createShowroom } from './showroom.js';
   scene.fog = new THREE.FogExp2(0x182334, 0.0018);
 
   const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 480);
-  const rearMirrorCam = new THREE.PerspectiveCamera(54, 2.7, 0.2, 150);
-  const leftMirrorCam = new THREE.PerspectiveCamera(52, 1.55, 0.2, 120);
-  const rightMirrorCam = new THREE.PerspectiveCamera(52, 1.55, 0.2, 120);
+  const rearMirrorCam = new THREE.PerspectiveCamera(54, 2.7, 0.2, 110);
+  const leftMirrorCam = new THREE.PerspectiveCamera(52, 1.55, 0.2, 95);
+  const rightMirrorCam = new THREE.PerspectiveCamera(52, 1.55, 0.2, 95);
 
-  // Balanced, clean studio & daylight illumination focused directly on the player's car
-  const hemiLight = new THREE.HemisphereLight(0xdbeafe, 0x1e293b, 1.05);
+  // Balanced, clean illumination focused on the player's car (uses ferrariAO contact shadow instead of expensive shadow map passes)
+  const hemiLight = new THREE.HemisphereLight(0xdbeafe, 0x1e293b, 1.08);
   scene.add(hemiLight);
 
   const sunLight = new THREE.DirectionalLight(0xfffaf0, 1.55);
   sunLight.position.set(16, 28, 18);
-  sunLight.castShadow = true;
-  // Tight 14m shadow frustum centered around the player's car for ultra-crisp car shadows at 60 FPS
-  sunLight.shadow.mapSize.set(1024, 1024);
-  sunLight.shadow.camera.near = 2;
-  sunLight.shadow.camera.far = 65;
-  sunLight.shadow.camera.left = -8;
-  sunLight.shadow.camera.right = 8;
-  sunLight.shadow.camera.top = 8;
-  sunLight.shadow.camera.bottom = -8;
-  sunLight.shadow.bias = -0.0005;
+  sunLight.castShadow = false;
   scene.add(sunLight);
   scene.add(sunLight.target);
 
@@ -366,6 +357,15 @@ import { createShowroom } from './showroom.js';
       }
       audio.triggerShiftPop();
       phys.gear = nextGear;
+      // Rev-match throttle blip on manual downshift
+      if (delta < 0 && nextGear >= 1) {
+        const gIdx = Math.max(0, Math.min(specs.numGears - 1, nextGear - 1));
+        const newRatio = specs.gearRatios[gIdx];
+        const topRatio = specs.gearRatios[specs.numGears - 1];
+        const newGearMaxMs = Math.max(11, specs.maxSpeedMs * (topRatio / newRatio));
+        const newWheelRpm = (Math.abs(phys.vs) / newGearMaxMs) * specs.redline;
+        phys.rpm = Math.min(specs.redline * 0.96, Math.max(phys.rpm + 450, newWheelRpm));
+      }
       phys.shiftCutTimer = 0.085; // 85ms clutch torque cut
     }
   }
@@ -503,14 +503,16 @@ import { createShowroom } from './showroom.js';
 
   function resetRun() {
     invalidateSpecs();
+    const s = getSpecs();
     phys.vs = 0;
     phys.vx = 0;
     phys.x = 2.2;
     phys.s = 40.0;
     phys.heading = 0;
     phys.gear = 1;
+    phys.rpm = s.idleRpm;
     phys.boostBar = 0;
-    phys.nos = getSpecs().nosCap;
+    phys.nos = s.nosCap;
     scoreState.total = 0;
     scoreState.overtakes = 0;
     scoreState.combo = 1.0;
@@ -725,10 +727,10 @@ import { createShowroom } from './showroom.js';
   });
 
   renderer.domElement.addEventListener('pointerdown', e => {
+    dragging = true;
     if (gameState === 'garage') {
       showroom.onPointerDown(e);
     } else {
-      dragging = true;
       lastMX = e.clientX;
       lastMY = e.clientY;
     }
@@ -951,10 +953,18 @@ import { createShowroom } from './showroom.js';
 
   const camPosSmooth = new THREE.Vector3(2.2, 2.2, 6.2);
   const camLookSmooth = new THREE.Vector3(2.2, 0.95, -14);
-  let elapsed = 0, fpsF = 0, fpsT = 0;
+  let elapsed = 0, fpsF = 0, fpsT = 0, lastFrameMs = 0;
 
-  function animate() {
+  function animate(now = 0) {
     requestAnimationFrame(animate);
+    if (document.hidden) {
+      clock.getDelta();
+      return;
+    }
+    const minInterval = (gameState === 'garage' && !dragging) ? 20.0 : 14.0;
+    if (lastFrameMs && (now - lastFrameMs) < minInterval) return;
+    lastFrameMs = now;
+
     const dt = Math.min(clock.getDelta(), 0.04);
     elapsed += dt;
 
@@ -1007,50 +1017,79 @@ import { createShowroom } from './showroom.js';
       const curGearRatio = phys.gear === 0 ? 3.4 : specs.gearRatios[activeGearIdx];
       const topGearRatio = specs.gearRatios[specs.numGears - 1];
 
-      // Max vehicle speed achievable in the current gear at redline
-      const gearMaxSpeedMs = Math.max(12, specs.maxSpeedMs * (topGearRatio / curGearRatio));
-      const coupledRpm = 900 + (spdAbs / gearMaxSpeedMs) * (specs.redline - 900);
+      // Max vehicle speed achievable in the current gear at redline -> true wheel-referred RPM (0 at standstill)
+      const gearMaxSpeedMs = Math.max(11, specs.maxSpeedMs * (topGearRatio / curGearRatio));
+      const wheelCoupledRpm = (spdAbs / gearMaxSpeedMs) * specs.redline;
 
-      // Automatic (AT) vs Manual Sequential (MT) Gear Shifting Logic
+      // Automatic (AT) vs Manual Sequential (MT) Gear Shifting Logic (throttle-sensitive shift points)
       if (playerConfig.transmission === 'AT') {
-        if (phys.vs < -0.4) {
-          phys.gear = 0; // Reverse
+        if (phys.vs < -0.4 && !throttle) {
+          phys.gear = 0; // Reverse only when not flooring throttle
         } else {
-          if (phys.gear === 0) phys.gear = 1;
-          if (coupledRpm >= specs.redline * 0.93 && phys.gear < specs.numGears && phys.shiftCutTimer <= 0) {
+          if (phys.gear === 0 && (throttle > 0 || phys.vs >= -0.2)) phys.gear = 1;
+          const upFrac = throttle > 0.5 ? 0.92 : 0.62;
+          const downFrac = throttle > 0.5 ? 0.46 : 0.28;
+          if (wheelCoupledRpm >= specs.redline * upFrac && phys.gear < specs.numGears && phys.shiftCutTimer <= 0) {
             manualShift(1);
-          } else if (coupledRpm < specs.redline * 0.44 && phys.gear > 1 && phys.shiftCutTimer <= 0) {
+          } else if (wheelCoupledRpm < specs.redline * downFrac && phys.gear > 1 && phys.shiftCutTimer <= 0) {
             phys.gear--;
           }
         }
       }
 
-      // Rev limiter bounce in Manual (MT) if hitting redline
+      // Crankshaft / Flywheel RPM: driven by Throttle & inertia; braking NEVER directly drops RPM
       let hitRevLimiter = false;
-      if (coupledRpm >= specs.redline) {
-        hitRevLimiter = true;
-        phys.rpm = specs.redline - (Math.sin(elapsed * 55) > 0 ? 140 : 0);
+      const effectiveThrottle = (phys.shiftCutTimer > 0) ? 0 : throttle;
+
+      if (effectiveThrottle > 0) {
+        const converterCeiling = (phys.gear <= 1 || brake)
+          ? specs.launchStallRpm
+          : (playerConfig.transmission === 'AT'
+              ? Math.max(specs.idleRpm, wheelCoupledRpm + 550)
+              : Math.max(specs.idleRpm, wheelCoupledRpm));
+        const slipCeiling = Math.max(wheelCoupledRpm, converterCeiling);
+        if (wheelCoupledRpm >= specs.redline) {
+          hitRevLimiter = true;
+          phys.rpm = specs.redline - (Math.sin(elapsed * 58) > 0 ? 150 : 0);
+        } else if (phys.rpm < slipCeiling) {
+          phys.rpm = Math.min(specs.redline, phys.rpm + specs.revUpRate * effectiveThrottle * dt);
+          if (wheelCoupledRpm > phys.rpm) phys.rpm = wheelCoupledRpm;
+        } else {
+          phys.rpm += (Math.min(specs.redline, wheelCoupledRpm) - phys.rpm) * Math.min(1, dt * 14);
+        }
       } else {
-        const freeRev = throttle ? Math.max(coupledRpm, 1350) : coupledRpm;
-        phys.rpm += (Math.min(specs.redline, freeRev) - phys.rpm) * Math.min(1, dt * 16);
+        const coastFloor = (phys.shiftCutTimer > 0)
+          ? specs.idleRpm
+          : (playerConfig.transmission === 'AT'
+              ? Math.max(specs.idleRpm, wheelCoupledRpm * 0.26)
+              : (wheelCoupledRpm > specs.idleRpm * 1.18 ? wheelCoupledRpm : specs.idleRpm));
+        if (phys.rpm > coastFloor) {
+          const dropRate = playerConfig.transmission === 'MT' && wheelCoupledRpm > specs.idleRpm * 1.18
+            ? specs.revDropRate * 1.35
+            : specs.revDropRate;
+          phys.rpm = Math.max(coastFloor, phys.rpm - dropRate * dt);
+        } else {
+          phys.rpm += (coastFloor - phys.rpm) * Math.min(1, dt * 10);
+        }
       }
 
-      // Forced Induction Spool Physics (NA vs TURBO vs TWIN-TURBO vs SUPERCHARGED)
-      if (specs.aspiration === 'NA' || specs.maxBoostBar <= 0) {
+      // Forced Induction Spool Physics (NA vs Supercharger instant boost vs Exhaust-driven Turbo lag)
+      if (specs.aspiration === 'NA' || specs.isEV || specs.maxBoostBar <= 0) {
         phys.boostBar = 0;
       } else if (specs.aspiration === 'SUPERCHARGED') {
-        const rpmFrac = Math.max(0, (phys.rpm - 1100) / (specs.redline - 1100));
-        const targetB = throttle ? specs.maxBoostBar * Math.pow(rpmFrac, 0.75) : 0;
-        phys.boostBar += (targetB - phys.boostBar) * Math.min(1, dt * 14);
+        const rpmFrac = Math.max(0, (phys.rpm - specs.spoolRpm) / Math.max(1000, specs.redline - specs.spoolRpm));
+        const targetB = effectiveThrottle ? specs.maxBoostBar * Math.pow(Math.min(1, rpmFrac), 0.72) : 0;
+        phys.boostBar += (targetB - phys.boostBar) * Math.min(1, dt * specs.spoolRateUp);
       } else {
-        // Exhaust-driven Turbocharger spool lag & inertia
-        const canSpool = throttle && phys.rpm > specs.spoolRpm * 0.72 && phys.shiftCutTimer <= 0;
-        const spoolProgress = Math.max(0, Math.min(1, (phys.rpm - specs.spoolRpm * 0.68) / (specs.redline * 0.35)));
-        const targetB = canSpool ? specs.maxBoostBar * spoolProgress : 0;
-        const spoolSpeed = canSpool
-          ? (specs.aspiration === 'TWIN-TURBO' ? 4.2 : 2.6)
-          : 7.5;
-        phys.boostBar += (targetB - phys.boostBar) * Math.min(1, dt * spoolSpeed);
+        const exhaustFlow = effectiveThrottle * Math.pow(Math.max(0, phys.rpm / specs.redline), 1.35);
+        const canSpool = effectiveThrottle > 0 && phys.rpm > specs.spoolRpm * 0.68;
+        const rpmBoostCap = canSpool
+          ? specs.maxBoostBar * Math.max(0, Math.min(1, (phys.rpm - specs.spoolRpm * 0.68) / Math.max(900, specs.redline * 0.36)))
+          : 0;
+        const rate = canSpool
+          ? specs.spoolRateUp * (0.32 + 0.95 * exhaustFlow)
+          : specs.spoolRateDown;
+        phys.boostBar += (rpmBoostCap - phys.boostBar) * Math.min(1, dt * rate);
       }
 
       const boostFraction = specs.maxBoostBar > 0 ? (phys.boostBar / specs.maxBoostBar) : 1.0;
@@ -1061,11 +1100,12 @@ import { createShowroom } from './showroom.js';
         specs.hp,
         specs.aspiration,
         specs.maxBoostBar,
-        boostFraction
+        boostFraction,
+        specs.isEV
       );
       const activeThrottle = (phys.shiftCutTimer > 0 || hitRevLimiter) ? 0 : throttle;
-      phys.liveTorqueNm = Math.round(engineOut.torqueNm * (activeThrottle ? 1.0 : 0.14) * (wantNos ? 1.38 : 1.0));
-      phys.liveHp = Math.round((phys.liveTorqueNm * phys.rpm) / 7127);
+      phys.liveTorqueNm = Math.round(engineOut.torqueNm * (activeThrottle ? 1.0 : 0.08) * (wantNos ? 1.35 : 1.0));
+      phys.liveHp = Math.round((phys.liveTorqueNm * Math.max(phys.rpm, specs.isEV ? 2500 : 0)) / 7127);
 
       // Wheel Drive Force from Engine Torque * Gear Ratio
       const finalDrive = 3.42;
@@ -1080,14 +1120,17 @@ import { createShowroom } from './showroom.js';
       const maxTireGripForce = specs.base.mass * 9.81 * specs.cornerG * driveTractionShare;
       const cappedDriveForce = Math.min(rawWheelForce, maxTireGripForce * 1.12);
 
-      // Aerodynamic Drag & Rolling Resistance
+      // Aerodynamic Drag, Rolling Resistance & Off-Throttle Engine Compression Braking
       const aeroDrag = 0.5 * 1.225 * specs.base.drag * 2.05 * phys.vs * spdAbs;
       const rolling = phys.vs * (14.0 + specs.base.mass * 0.004);
+      const engineDrag = (activeThrottle === 0 && phys.vs > 0.5 && phys.gear > 0)
+        ? specs.base.mass * (playerConfig.transmission === 'MT' ? 0.48 : 0.16) * (curGearRatio / topGearRatio)
+        : 0;
 
-      // Braking System Physics
+      // Wheel Braking System Physics (stops vehicle speed ONLY; does not directly suppress engine RPM)
       let brakeForce = 0;
       if (brake) {
-        if (phys.vs > 0.6 && phys.gear > 0) {
+        if (throttle > 0 || phys.vs > 0.6 || (playerConfig.transmission === 'MT' && phys.gear > 0)) {
           brakeForce = specs.base.mass * specs.brakeG * 9.81;
         } else {
           if (playerConfig.transmission === 'AT') phys.gear = 0;
@@ -1099,8 +1142,10 @@ import { createShowroom } from './showroom.js';
       }
 
       const signedDrive = phys.gear === 0 ? -cappedDriveForce * 0.5 : cappedDriveForce;
-      const netAccel = (signedDrive - aeroDrag - rolling - brakeForce) / specs.base.mass;
-      phys.vs = Math.min(specs.maxSpeedMs * (wantNos ? 1.12 : 1.0), phys.vs + netAccel * dt);
+      const netAccel = (signedDrive - aeroDrag - rolling - engineDrag - brakeForce) / specs.base.mass;
+      let nextVs = Math.min(specs.maxSpeedMs * (wantNos ? 1.12 : 1.0), phys.vs + netAccel * dt);
+      if (brake && phys.gear > 0 && phys.vs >= 0 && nextVs < 0) nextVs = 0;
+      phys.vs = nextVs;
       if (!throttle && !brake && Math.abs(phys.vs) < 0.2) phys.vs = 0;
 
       // Steering & Lateral Tire Grip (FWD understeer vs RWD oversteer vs AWD neutral grip)
@@ -1217,7 +1262,7 @@ import { createShowroom } from './showroom.js';
           evaluateOvertake(a);
         }
 
-        a.mesh.visible = Math.abs(curRel) <= STREAM_RADIUS;
+        a.mesh.visible = (curRel >= -STREAM_BEHIND && curRel <= STREAM_AHEAD);
         if (a.mesh.visible) {
           a.mesh.position.set(a.laneX, 0, -curRel);
         }
@@ -1226,15 +1271,10 @@ import { createShowroom } from './showroom.js';
       for (let i = 0; i < vehicles.trafficAgents.length; i++) {
         const a = vehicles.trafficAgents[i];
         const curRel = wrapDelta(a.s, phys.s);
-        a.mesh.visible = Math.abs(curRel) <= STREAM_RADIUS;
+        a.mesh.visible = (curRel >= -STREAM_BEHIND && curRel <= STREAM_AHEAD);
         if (a.mesh.visible) a.mesh.position.set(a.laneX, 0, -curRel);
       }
     }
-
-    // Keep tight directional car shadow centered on the player's car
-    sunLight.position.set(phys.x + 14, 26, 16);
-    sunLight.target.position.set(phys.x, 0, 0);
-    sunLight.target.updateMatrixWorld();
 
     audio.updateEngineAudio(
       phys.rpm,
@@ -1337,7 +1377,6 @@ import { createShowroom } from './showroom.js';
     renderer.setScissorTest(false);
     renderer.setViewport(0, 0, W, H);
     renderer.clear();
-    if (gameState === 'playing') renderer.shadowMap.needsUpdate = true;
     renderer.render(scene, camera);
 
     // ---- RENDER PASS 2: LIVE REAR-VIEW & LEFT/RIGHT SIDE MIRRORS ----

@@ -103,26 +103,75 @@ export function computeVehicleSpecs() {
   const maxSpeedMs = Math.min(physTopSpeedMs * 1.04, gearTopSpeedMs);
   const topSpeedKmh = Math.round(maxSpeedMs * 3.6);
 
-  const spoolRpm = aspiration === 'NA'
+  const isEV = /Dual-Motor|HyperEV/i.test(base.engineCode) && playerConfig.aspirationMod === 'stock';
+
+  const idleRpm = isEV ? 0 : (redline >= 8200 ? 980 : (redline <= 5500 ? 720 : 850));
+  const launchStallRpm = isEV
+    ? 1800
+    : (aspiration === 'NA'
+        ? (redline >= 8000 ? 3400 : 2500)
+        : (aspiration === 'SUPERCHARGED' ? 2700 : (aspiration === 'TWIN-TURBO' ? 3100 : 3300)));
+
+  const inertiaStageScale = 1 + playerConfig.engineStage * 0.10;
+  let baseRevUp = 4400;
+  let baseRevDrop = 2500;
+  if (isEV) {
+    baseRevUp = 8000;
+    baseRevDrop = 5200;
+  } else if (aspiration === 'NA') {
+    baseRevUp = redline >= 8000 ? 6800 : 4400;
+    baseRevDrop = redline >= 8000 ? 4200 : 2500;
+  } else if (aspiration === 'TWIN-TURBO') {
+    baseRevUp = 5400;
+    baseRevDrop = 3200;
+  } else if (aspiration === 'TURBO') {
+    baseRevUp = 4600;
+    baseRevDrop = 2800;
+  } else if (aspiration === 'SUPERCHARGED') {
+    baseRevUp = 5000;
+    baseRevDrop = 3100;
+  }
+  const revUpRate = Math.round(baseRevUp * inertiaStageScale);
+  const revDropRate = Math.round(baseRevDrop * inertiaStageScale);
+
+  const spoolRpm = (aspiration === 'NA' || isEV)
     ? 0
-    : (aspiration === 'SUPERCHARGED' ? 1500 : (aspiration === 'TWIN-TURBO' ? 2400 : 3400));
+    : (aspiration === 'SUPERCHARGED'
+        ? 1200
+        : (aspiration === 'TWIN-TURBO'
+            ? 2250
+            : Math.round(redline * (playerConfig.aspirationMod === 'single_turbo' ? 0.46 : 0.42))));
+  const spoolRateUp = aspiration === 'SUPERCHARGED' ? 22.0 : (aspiration === 'TWIN-TURBO' ? 3.2 : 1.65);
+  const spoolRateDown = aspiration === 'SUPERCHARGED' ? 24.0 : (aspiration === 'TWIN-TURBO' ? 5.5 : 4.8);
 
   const dynoPoints = [];
   for (let i = 0; i <= 28; i++) {
     const r = 1000 + (i / 28) * (redline - 1000);
-    const d = sampleEngineCurve(r, redline, torqueNm, hp, aspiration, maxBoostBar, 1.0);
+    const steadyBoost = (aspiration === 'NA' || isEV || maxBoostBar <= 0)
+      ? 1.0
+      : (aspiration === 'SUPERCHARGED'
+          ? Math.min(1, Math.max(0, (r - 1100) / Math.max(800, redline - 1100)))
+          : Math.max(0, Math.min(1, (r - spoolRpm * 0.72) / Math.max(800, redline * (aspiration === 'TWIN-TURBO' ? 0.22 : 0.32)))));
+    const d = sampleEngineCurve(r, redline, torqueNm, hp, aspiration, maxBoostBar, steadyBoost, isEV);
     dynoPoints.push({ rpm: Math.round(r), torque: Math.round(d.torqueNm), hp: Math.round(d.hp) });
   }
 
   return {
     base,
+    isEV,
     aspiration,
     drivetrain,
     hp,
     torqueNm,
     redline,
+    idleRpm,
+    launchStallRpm,
+    revUpRate,
+    revDropRate,
     maxBoostBar,
     spoolRpm,
+    spoolRateUp,
+    spoolRateDown,
     numGears,
     gearRatios,
     topSpeedKmh,
@@ -136,33 +185,40 @@ export function computeVehicleSpecs() {
   };
 }
 
-export function sampleEngineCurve(rpm, redline, peakTorqueNm, peakHp, aspiration, maxBoostBar, boostFraction = 1.0) {
-  const normRpm = Math.max(0, Math.min(1.08, (rpm - 900) / Math.max(1000, redline - 900)));
-  let torqueFactor = 0.55;
+export function sampleEngineCurve(rpm, redline, peakTorqueNm, peakHp, aspiration, maxBoostBar, boostFraction = 1.0, isEV = false) {
+  const normRpm = Math.max(0, Math.min(1.08, (rpm - 800) / Math.max(1200, redline - 800)));
+  let torqueFactor = 0.45;
 
-  if (aspiration === 'NA') {
-    const baseBell = 0.66 + 0.34 * Math.sin(Math.pow(Math.min(1, normRpm), 0.85) * Math.PI * 0.88);
-    const vtecKick = normRpm > 0.62 ? 0.08 * Math.sin(((normRpm - 0.62) / 0.38) * Math.PI) : 0;
-    torqueFactor = baseBell + vtecKick;
+  if (isEV) {
+    torqueFactor = normRpm <= 0.55 ? 0.98 : Math.max(0.42, 0.98 * (0.55 / normRpm));
+  } else if (aspiration === 'NA') {
+    if (redline >= 7800) {
+      const clampedNorm = Math.min(1, normRpm);
+      const base = 0.34 + 0.54 * Math.pow(clampedNorm, 0.82);
+      const highCam = clampedNorm > 0.56 ? 0.14 * Math.sin(((clampedNorm - 0.56) / 0.44) * Math.PI * 0.88) : 0;
+      torqueFactor = base + highCam;
+    } else {
+      torqueFactor = 0.48 + 0.52 * Math.sin(Math.pow(Math.min(1, normRpm), 0.72) * Math.PI * 0.86);
+    }
   } else if (aspiration === 'SUPERCHARGED') {
-    const baseCurve = 0.76 + 0.24 * Math.sin(Math.min(1, normRpm) * Math.PI * 0.82);
-    const boostContribution = 0.28 * boostFraction * (0.5 + 0.5 * Math.min(1, normRpm * 1.3));
-    torqueFactor = baseCurve * (0.78 + boostContribution);
+    const clampedNorm = Math.min(1, normRpm);
+    const naBase = 0.44 + 0.26 * Math.sin(clampedNorm * Math.PI * 0.85);
+    const scBoost = 0.34 * boostFraction * (0.55 + 0.45 * Math.min(1, clampedNorm * 1.35));
+    const beltDrag = clampedNorm > 0.85 ? (clampedNorm - 0.85) * 0.45 : 0;
+    torqueFactor = naBase + scBoost - beltDrag;
   } else {
-    const spoolStart = aspiration === 'TWIN-TURBO' ? 0.20 : 0.34;
-    const naturalNa = 0.52 + 0.18 * Math.sin(Math.min(1, normRpm) * Math.PI * 0.85);
-    const turboWindow = Math.max(0, Math.min(1, (normRpm - spoolStart) / 0.24));
-    const topEndTapering = normRpm > 0.86 ? 1.0 - (normRpm - 0.86) * 0.85 : 1.0;
-    const boostMult = turboWindow * boostFraction * topEndTapering;
-    torqueFactor = naturalNa + 0.46 * boostMult;
+    const clampedNorm = Math.min(1, normRpm);
+    const offBoostNa = 0.30 + 0.20 * Math.sin(clampedNorm * Math.PI * 0.85);
+    const topTaper = clampedNorm > 0.86 ? 1.0 - (clampedNorm - 0.86) * 0.80 : 1.0;
+    torqueFactor = offBoostNa + 0.54 * boostFraction * topTaper;
   }
 
   if (rpm > redline) {
     torqueFactor *= Math.max(0.1, 1.0 - ((rpm - redline) / 250));
   }
 
-  const currentTorqueNm = peakTorqueNm * Math.max(0.25, Math.min(1.06, torqueFactor));
-  const currentHp = (currentTorqueNm * rpm) / 7127;
+  const currentTorqueNm = peakTorqueNm * Math.max(0.22, Math.min(1.05, torqueFactor));
+  const currentHp = (currentTorqueNm * Math.max(rpm, isEV ? 2500 : 0)) / 7127;
   return { torqueNm: currentTorqueNm, hp: currentHp };
 }
 
@@ -300,6 +356,13 @@ function normalizeRealGLB(modelClone, glbKey, carDef, spacerOffset = 0) {
     -((cached.rawMin.z + cached.rawMax.z) * 0.5) * sz
   );
   wrapper.updateMatrixWorld(true);
+
+  modelClone.traverse(n => {
+    if (n.isMesh && !/wheel|steer/i.test(n.name || '')) {
+      n.updateMatrix();
+      n.matrixAutoUpdate = false;
+    }
+  });
 
   const finalSize = new THREE.Vector3(
     cached.rawSize.x * sx,
@@ -784,13 +847,13 @@ export function createVehicleManager(scene, assets) {
 
   // Diverse Real 3D .GLB Traffic Fleet (SUVs, Sedans, Coupes, Muscle Cars, Supercars!)
   const trafficAgents = [];
-  const trafficPoolKeys = ['bmwm5', 'sedan', 'suv_q7', 'muscle', 'g63', 'ferrari'];
+  const trafficPoolKeys = ['muscle', 'ferrari', 'bmwm5', 'porsche_718'];
   const trafficColors = ['#dc2626', '#0284c7', '#f59e0b', '#16a34a', '#f8fafc', '#334155', '#7c3aed', '#e11d48'];
 
   function spawnTrafficFleet(loopLen) {
     const availKeys = trafficPoolKeys.filter(k => assets.models[k]);
     const pool = availKeys.length ? availKeys : ['ferrari'];
-    const countPerLane = 3;
+    const countPerLane = 2;
     for (let k = 0; k < countPerLane; k++) {
       const s = k * (loopLen / countPerLane);
       addTrafficAgent(-6.6, s + 30,  -1, 19 + (k % 3) * 2.5, pool[k % pool.length], trafficColors[k % trafficColors.length], loopLen);
