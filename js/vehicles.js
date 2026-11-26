@@ -219,7 +219,7 @@ function normalizeRealGLB(modelClone, glbKey, carDef, spacerOffset = 0) {
   // Strip studio floors, fabric backdrops, and stray streetlamps embedded in third-party GLBs
   const toRemove = [];
   modelClone.traverse(n => {
-    if (n.name === 'Ground' || n.name === 'Fabric' || (n.name && n.name.startsWith('LanternGlass'))) {
+    if (n.name === 'Ground' || n.name === 'Fabric' || n.name === 'Plane.007_28' || (n.name && n.name.startsWith('LanternGlass'))) {
       toRemove.push(n);
     }
   });
@@ -395,9 +395,8 @@ function applyCustomMaterialsToGLB(modelClone, glbKey, mats, twoTone) {
         return twoTone ? accentMat : matCarbon;
       }
 
-      const cloned = origMat.clone();
-      cloned.envMapIntensity = 1.35;
-      return cloned;
+      origMat.envMapIntensity = 1.35;
+      return origMat;
     };
 
     if (Array.isArray(node.material)) {
@@ -416,13 +415,13 @@ export function createVehicleManager(scene, assets) {
 
   const radialGlowTex = createRadialGlowTexture();
 
-  const matCarbon = new THREE.MeshPhysicalMaterial({
+  const matCarbon = new THREE.MeshStandardMaterial({
     color: 0x1c2026,
     map: assets.textures.carbonColor || null,
     normalMap: assets.textures.carbonNormal || null,
     roughness: 0.25,
-    metalness: 0.35,
-    clearcoat: 0.85,
+    metalness: 0.38,
+    envMapIntensity: 1.25,
     side: THREE.DoubleSide
   });
 
@@ -459,16 +458,13 @@ export function createVehicleManager(scene, assets) {
         side: THREE.DoubleSide
       });
     }
-    const rough = finish === 'matte' ? 0.55 : (finish === 'metallic' ? 0.14 : (finish === 'pearl' ? 0.09 : 0.07));
-    const metal = finish === 'metallic' ? 0.85 : (finish === 'matte' ? 0.20 : (finish === 'pearl' ? 0.55 : 0.36));
-    return new THREE.MeshPhysicalMaterial({
+    const rough = finish === 'matte' ? 0.55 : (finish === 'metallic' ? 0.14 : (finish === 'pearl' ? 0.09 : 0.08));
+    const metal = finish === 'metallic' ? 0.85 : (finish === 'matte' ? 0.20 : (finish === 'pearl' ? 0.62 : 0.45));
+    return new THREE.MeshStandardMaterial({
       color: new THREE.Color(hexColor),
       roughness: rough,
       metalness: metal,
-      clearcoat: finish === 'matte' ? 0.05 : 1.0,
-      clearcoatRoughness: 0.04,
-      iridescence: finish === 'pearl' ? 0.65 : 0.0,
-      envMapIntensity: 1.35,
+      envMapIntensity: 1.38,
       side: THREE.DoubleSide
     });
   }
@@ -481,19 +477,18 @@ export function createVehicleManager(scene, assets) {
       blue:  { color: 0x0c4a6e, opacity: 0.62 }
     };
     const cfg = map[tint] || map.smoke;
-    return new THREE.MeshPhysicalMaterial({
+    return new THREE.MeshStandardMaterial({
       color: cfg.color,
-      roughness: 0.05,
-      metalness: 0.15,
-      clearcoat: 1.0,
+      roughness: 0.06,
+      metalness: 0.25,
       transparent: true,
       opacity: cfg.opacity,
-      envMapIntensity: 1.5,
+      envMapIntensity: 1.45,
       side: THREE.DoubleSide
     });
   }
 
-  function buildCarModel(carDef, overrideOpts = null) {
+  function buildCarModel(carDef, overrideOpts = null, castShadow = true) {
     const useStock = overrideOpts !== null;
     const specs = computeVehicleSpecs();
     const cfg = useStock
@@ -560,15 +555,18 @@ export function createVehicleManager(scene, assets) {
     let pending = null;
 
     if (!sourceGLB) {
-      if (assets.ensureGLBModel) {
+      if (assets.ensureGLBModel && !(assets.isGLBFailed && assets.isGLBFailed(glbKey))) {
         pending = assets.ensureGLBModel(glbKey);
-        if (!useStock) {
+        if (!useStock && castShadow) {
           const expectedCarId = playerConfig.carId;
           pending.then(loaded => {
             if (loaded && playerConfig.carId === expectedCarId) {
               rebuildPlayerCar();
             }
           });
+        }
+        if (!castShadow) {
+          return { group: root, root, pending, wheels, frontSteer, steeringWheel, brakeMat, flames: [], lightbarPair: [] };
         }
       }
       sourceGLB = assets.models.sedan || assets.models.ferrari;
@@ -758,11 +756,11 @@ export function createVehicleManager(scene, assets) {
 
   // Diverse Real 3D .GLB Traffic Fleet (SUVs, Sedans, Coupes, Muscle Cars, Supercars!)
   const trafficAgents = [];
-  const trafficPoolKeys = ['bmwm5', 'sedan', 'suv_q7', 'porsche_gt3rs', 'muscle', 'g63', 'ferrari', 'mclaren'];
+  const trafficPoolKeys = ['bmwm5', 'sedan', 'suv_q7', 'muscle', 'g63', 'ferrari'];
   const trafficColors = ['#dc2626', '#0284c7', '#f59e0b', '#16a34a', '#f8fafc', '#334155', '#7c3aed', '#e11d48'];
 
   function spawnTrafficFleet(loopLen) {
-    const countPerLane = 4;
+    const countPerLane = 3;
     for (let k = 0; k < countPerLane; k++) {
       const s = k * (loopLen / countPerLane);
       addTrafficAgent(-6.6, s + 30,  -1, 19 + (k % 3) * 2.5, trafficPoolKeys[k % trafficPoolKeys.length], trafficColors[k % trafficColors.length], loopLen);

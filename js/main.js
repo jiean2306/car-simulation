@@ -24,13 +24,12 @@ import { createShowroom } from './showroom.js';
   const container = document.getElementById('canvas-container');
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
-    powerPreference: 'high-performance',
-    preserveDrawingBuffer: true
+    powerPreference: 'high-performance'
   });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.96;
   renderer.autoClear = false;
@@ -117,7 +116,7 @@ import { createShowroom } from './showroom.js';
   const audio = createAudioSystem();
   const showroom = createShowroom(assets, vehicles);
 
-  vehicles.rebuildPlayerCar();
+  let playerCarDirty = true;
   vehicles.spawnTrafficFleet(LOOP_LEN);
 
   if (loadingScreenEl) loadingScreenEl.classList.add('hidden');
@@ -149,19 +148,18 @@ import { createShowroom } from './showroom.js';
     syncPaintUI(c.defaultColor);
   }
 
-  function selectShowroomIndex(nextIdx, rebuildPlatform = true) {
+  function selectShowroomIndex(nextIdx) {
     if (!showroomRoster.length) return;
     showroomIndex = ((nextIdx % showroomRoster.length) + showroomRoster.length) % showroomRoster.length;
     const c = showroomRoster[showroomIndex];
     applyCarDefSelection(c);
-    showroom.setIndex(showroomIndex);
-    if (rebuildPlatform) showroom.refreshCurrent();
-    vehicles.rebuildPlayerCar();
+    playerCarDirty = true;
     updateGarageStatsAndDynoUI();
+    showroom.setIndex(showroomIndex);
   }
 
   function stepShowroom(delta) {
-    selectShowroomIndex(showroomIndex + delta, true);
+    selectShowroomIndex(showroomIndex + delta);
   }
 
   function renderBrandPills() {
@@ -179,9 +177,9 @@ import { createShowroom } from './showroom.js';
         if (idx < 0) idx = 0;
         showroomIndex = idx;
         applyCarDefSelection(showroomRoster[showroomIndex]);
+        playerCarDirty = true;
         showroom.setRoster(showroomRoster, showroomIndex);
         renderBrandPills();
-        vehicles.rebuildPlayerCar();
         updateGarageStatsAndDynoUI();
       });
       brandPillsEl.appendChild(btn);
@@ -279,7 +277,6 @@ import { createShowroom } from './showroom.js';
   showroomIndex = initialIdx;
   applyCarDefSelection(showroomRoster[showroomIndex]);
   showroom.setRoster(showroomRoster, showroomIndex);
-  vehicles.rebuildPlayerCar();
   updateGarageStatsAndDynoUI();
 
   // ============================================================================
@@ -458,13 +455,16 @@ import { createShowroom } from './showroom.js';
 
   function setGameState(next) {
     gameState = next;
+    if (next === 'playing' && playerCarDirty) {
+      vehicles.rebuildPlayerCar();
+      playerCarDirty = false;
+    }
     if (showroomUi) showroomUi.classList.toggle('hidden', next !== 'garage');
     pauseOverlay.classList.toggle('hidden', next !== 'paused');
     topHud.classList.toggle('garage-hidden', next === 'garage');
     bottomHud.classList.toggle('garage-hidden', next === 'garage');
     mirrorsLayer.classList.toggle('hidden', !mirrorsEnabled || next !== 'playing');
     if (next !== 'garage') setDrawerOpen(false);
-    else showroom.refreshCurrent();
     if (next === 'paused') {
       document.getElementById('pause-stats').textContent =
         `Score: ${scoreState.total.toLocaleString()} · Overtakes: ${scoreState.overtakes} · Best: ${scoreState.bestGrade}`;
@@ -519,7 +519,6 @@ import { createShowroom } from './showroom.js';
   });
   document.getElementById('btn-drive-now').addEventListener('click', () => {
     audio.ensureAudio();
-    vehicles.rebuildPlayerCar();
     setGameState('playing');
   });
 
@@ -702,7 +701,7 @@ import { createShowroom } from './showroom.js';
       row.querySelectorAll('.mod-chip').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       playerConfig[k] = parseFloat(b.dataset.val);
-      vehicles.rebuildPlayerCar();
+      playerCarDirty = true;
       showroom.refreshCurrent();
       updateGarageStatsAndDynoUI();
     }));
@@ -717,7 +716,7 @@ import { createShowroom } from './showroom.js';
         setTransmissionMode(b.dataset.val);
       } else {
         playerConfig[k] = b.dataset.val;
-        vehicles.rebuildPlayerCar();
+        playerCarDirty = true;
         showroom.refreshCurrent();
         updateGarageStatsAndDynoUI();
       }
@@ -730,7 +729,7 @@ import { createShowroom } from './showroom.js';
       row.querySelectorAll('.dot-chip').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       playerConfig[k] = b.dataset.val;
-      vehicles.rebuildPlayerCar();
+      playerCarDirty = true;
       showroom.refreshCurrent();
       updateGarageStatsAndDynoUI();
     }));
@@ -741,18 +740,18 @@ import { createShowroom } from './showroom.js';
     sw.classList.add('active');
     playerConfig.paint = sw.dataset.color;
     document.getElementById('custom-paint').value = sw.dataset.color;
-    vehicles.rebuildPlayerCar();
+    playerCarDirty = true;
     showroom.refreshCurrent();
   }));
 
   document.getElementById('custom-paint').addEventListener('input', e => {
     playerConfig.paint = e.target.value;
-    vehicles.rebuildPlayerCar();
+    playerCarDirty = true;
     showroom.refreshCurrent();
   });
   document.getElementById('custom-accent').addEventListener('input', e => {
     playerConfig.accentColor = e.target.value;
-    vehicles.rebuildPlayerCar();
+    playerCarDirty = true;
     showroom.refreshCurrent();
   });
 

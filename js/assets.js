@@ -9,7 +9,7 @@ const MODEL_URLS = {
   porsche_718:    './assets/models/porsche_718.glb',
   porsche_918:    './assets/models/porsche_918.glb',
   porsche_930:    './assets/models/porsche_930.glb',
-  porsche_turbos: './assets/models/porsche_turbos.glb',
+  porsche_turbos: './assets/models/porsche911.glb',
   bmwm5:          './assets/models/bmwm5.glb',
   sedan:          './assets/models/sedan.glb',
   saloon:         './assets/models/saloon.glb',
@@ -39,9 +39,11 @@ export async function loadAllAssets(renderer, onProgress) {
 
   const modelsCache = {};
   const pendingLoads = {};
+  const failedLoads = new Set();
 
   function loadGLBKey(key, onStepLabel = null) {
     if (modelsCache[key]) return Promise.resolve(modelsCache[key]);
+    if (failedLoads.has(key)) return Promise.resolve(null);
     if (pendingLoads[key]) return pendingLoads[key];
     const url = MODEL_URLS[key];
     if (!url) return Promise.resolve(null);
@@ -51,12 +53,14 @@ export async function loadAllAssets(renderer, onProgress) {
         url,
         gltf => {
           modelsCache[key] = gltf ? gltf.scene : null;
+          if (!modelsCache[key]) failedLoads.add(key);
           if (onStepLabel) onStepLabel();
           resolve(modelsCache[key]);
         },
         undefined,
         err => {
           console.warn('GLB load warning:', url, err);
+          failedLoads.add(key);
           if (onStepLabel) onStepLabel();
           resolve(null);
         }
@@ -65,8 +69,8 @@ export async function loadAllAssets(renderer, onProgress) {
     return pendingLoads[key];
   }
 
-  // Initial fast boot set (loads in ~1.5s) + background prefetcher for all other real .GLB models
-  const bootKeys = ['ferrari', 'porsche_gt3rs', 'bmwm5', 'sedan', 'muscle', 'g63', 'suv_q7', 'mclaren'];
+  // Initial fast boot set (6 core models for instant start & traffic) + on-demand lazy loading for all other .GLBs
+  const bootKeys = ['ferrari', 'sedan', 'bmwm5', 'muscle', 'g63', 'suv_q7'];
   const totalSteps = bootKeys.length + 4;
   let completed = 0;
   function step(label) {
@@ -121,17 +125,12 @@ export async function loadAllAssets(renderer, onProgress) {
     ...bootKeys.map(k => loadGLBKey(k, () => step(`Loaded 3D ${k.toUpperCase()} Chassis (.GLB)`)))
   ]);
 
-  // Background stream remaining real .GLB models without blocking game start (skip huge models so they load on demand)
-  const lazyOnly = new Set(['jeep_wrangler', 'xiaomi_yu7']);
-  setTimeout(() => {
-    Object.keys(MODEL_URLS).forEach(k => {
-      if (!lazyOnly.has(k) && !modelsCache[k]) loadGLBKey(k);
-    });
-  }, 200);
-
+  // Load remaining .GLB models strictly on demand when selected in the showroom
+  // so background Draco decoding never competes with rendering or car switching.
   return {
     models: modelsCache,
     ensureGLBModel: loadGLBKey,
+    isGLBFailed: k => failedLoads.has(k),
     hdrs: {
       morning: hdrMorning
     },
