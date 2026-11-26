@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from '../vendor/three.module.js';
 import { CAR_CATALOG, CAR_BY_ID } from './carCatalog.js';
 
 export const playerConfig = {
@@ -189,7 +189,7 @@ const GLB_FORWARD_ROT_Y = {
   suv_q7:         Math.PI,
   lamborghini:    Math.PI,
   corvette:       Math.PI,
-  muscle:         -Math.PI * 0.5,
+  muscle:         60.5 * (Math.PI / 180),
   gtr:            Math.PI * 0.5,
   mclaren:        Math.PI,
   hatchback:      -Math.PI * 0.5,
@@ -211,44 +211,71 @@ function createRadialGlowTexture() {
   return new THREE.CanvasTexture(c);
 }
 
+const rawBoundsCache = new Map();
+
 /**
  * Normalizes any real 3D .GLB car model to face -Z, sit flush at Y = 0,
  * and match the target vehicle's length while preserving realistic window & roof proportions.
  */
 function normalizeRealGLB(modelClone, glbKey, carDef, spacerOffset = 0) {
-  // Strip studio floors, fabric backdrops, and stray streetlamps embedded in third-party GLBs
+  // Strip studio floors, flat baked shadow quads, fabric backdrops, and stray streetlamps embedded in third-party GLBs
   const toRemove = [];
   modelClone.traverse(n => {
-    if (n.name === 'Ground' || n.name === 'Fabric' || n.name === 'Plane.007_28' || (n.name && n.name.startsWith('LanternGlass'))) {
+    if (
+      n.name === 'Ground' ||
+      n.name === 'Fabric' ||
+      n.name === 'Plane.007_28' ||
+      n.name === 'Plane.015_62' ||
+      n.name === 'Object_140' ||
+      (n.name && n.name.startsWith('LanternGlass'))
+    ) {
       toRemove.push(n);
     }
   });
   toRemove.forEach(n => { if (n.parent) n.parent.remove(n); });
 
   const wrapper = new THREE.Group();
+  const scaleGroup = new THREE.Group();
   const inner = new THREE.Group();
   inner.add(modelClone);
 
   const rotY = GLB_FORWARD_ROT_Y[glbKey] !== undefined ? GLB_FORWARD_ROT_Y[glbKey] : Math.PI;
   inner.rotation.y = rotY;
-  wrapper.add(inner);
-  wrapper.updateMatrixWorld(true);
+  scaleGroup.add(inner);
+  wrapper.add(scaleGroup);
 
-  const box = new THREE.Box3().setFromObject(wrapper);
-  const size = new THREE.Vector3();
-  box.getSize(size);
-
-  // If width > length after initial rotation, rotate 90 degrees so length is along Z
-  if (size.x > size.z * 1.15) {
-    inner.rotation.y += Math.PI * 0.5;
+  let cached = rawBoundsCache.get(glbKey);
+  if (!cached) {
     wrapper.updateMatrixWorld(true);
-    box.setFromObject(wrapper);
+    const needPrecise = (glbKey === 'muscle' || glbKey === 'hatchback');
+    const box = new THREE.Box3().setFromObject(wrapper, needPrecise);
+    const size = new THREE.Vector3();
     box.getSize(size);
+
+    // If width > length after initial rotation, rotate 90 degrees so length is along Z
+    let extraRotY = 0;
+    if (size.x > size.z * 1.15) {
+      extraRotY = Math.PI * 0.5;
+      inner.rotation.y = rotY + extraRotY;
+      wrapper.updateMatrixWorld(true);
+      box.setFromObject(wrapper, needPrecise);
+      box.getSize(size);
+    }
+
+    cached = {
+      extraRotY,
+      rawMin: box.min.clone(),
+      rawMax: box.max.clone(),
+      rawSize: size.clone()
+    };
+    rawBoundsCache.set(glbKey, cached);
+  } else {
+    inner.rotation.y = rotY + cached.extraRotY;
   }
 
-  // Uniformly scale to target car length while keeping true-to-life window/roof aspect ratios
+  // Uniformly scale to target car length while keeping true-to-life proportions (supports 0.01x cm-exported GLBs)
   const targetLen = carDef.length || 4.55;
-  const uniformScale = targetLen / Math.max(size.z, 0.1);
+  const uniformScale = targetLen / Math.max(cached.rawSize.z, 1e-6);
 
   // Subtle proportion tailoring (e.g. compact hatchback vs long wagon vs wide track)
   let heightAdjust = 1.0;
@@ -262,23 +289,23 @@ function normalizeRealGLB(modelClone, glbKey, carDef, spacerOffset = 0) {
     }
   }
 
-  inner.scale.set(
-    uniformScale * widthAdjust,
-    uniformScale * heightAdjust,
-    uniformScale
+  const sx = uniformScale * widthAdjust;
+  const sy = uniformScale * heightAdjust;
+  const sz = uniformScale;
+
+  scaleGroup.scale.set(sx, sy, sz);
+  scaleGroup.position.set(
+    -((cached.rawMin.x + cached.rawMax.x) * 0.5) * sx,
+    -cached.rawMin.y * sy,
+    -((cached.rawMin.z + cached.rawMax.z) * 0.5) * sz
   );
   wrapper.updateMatrixWorld(true);
 
-  const box2 = new THREE.Box3().setFromObject(wrapper);
-  const center2 = new THREE.Vector3();
-  const finalSize = new THREE.Vector3();
-  box2.getCenter(center2);
-  box2.getSize(finalSize);
-
-  inner.position.x -= center2.x;
-  inner.position.y -= box2.min.y;
-  inner.position.z -= center2.z;
-  wrapper.updateMatrixWorld(true);
+  const finalSize = new THREE.Vector3(
+    cached.rawSize.x * sx,
+    cached.rawSize.y * sy,
+    cached.rawSize.z * sz
+  );
 
   return { group: wrapper, size: finalSize };
 }
@@ -287,13 +314,13 @@ function normalizeRealGLB(modelClone, glbKey, carDef, spacerOffset = 0) {
  * Traverses a real 3D .GLB car model and binds the user's custom Body Paint,
  * Two-Tone Accent/Carbon Hood & Roof, Window Glass Tint, Alloy Rim Color, and Brake Caliper Color.
  */
-function applyCustomMaterialsToGLB(modelClone, glbKey, mats, twoTone) {
+function applyCustomMaterialsToGLB(modelClone, glbKey, mats, twoTone, castShadow = false) {
   const { bodyMat, accentMat, glassMat, rimMat, calMat, matCarbon, brakeMat } = mats;
 
   modelClone.traverse(node => {
     if (!node.isMesh || !node.material) return;
-    node.castShadow = true;
-    node.receiveShadow = true;
+    node.castShadow = !!castShadow;
+    node.receiveShadow = false;
 
     const nName = (node.name || '').toLowerCase();
     const applyToSingleMat = origMat => {
@@ -581,7 +608,8 @@ export function createVehicleManager(scene, assets) {
         modelClone,
         glbKey,
         { bodyMat, accentMat, glassMat, rimMat, calMat, matCarbon, brakeMat },
-        cfg.livery === 'twotone'
+        cfg.livery === 'twotone',
+        castShadow
       );
 
       const norm = normalizeRealGLB(modelClone, glbKey, carDef, cfg.spacerOffset);
@@ -628,7 +656,7 @@ export function createVehicleManager(scene, assets) {
       const blade = new THREE.Mesh(new THREE.BoxGeometry(wingW, 0.02, isTA ? 0.17 : 0.13), matCarbon);
       blade.position.set(0, wingY, wingZ);
       blade.rotation.x = -0.12;
-      blade.castShadow = true;
+      blade.castShadow = !!castShadow;
       root.add(blade);
 
       [-wingW * 0.5, wingW * 0.5].forEach(ex => {
@@ -654,7 +682,7 @@ export function createVehicleManager(scene, assets) {
     } else if (cfg.roofAcc === 'box') {
       const rBox = new THREE.Mesh(new THREE.BoxGeometry(carSize.x * 0.38, 0.17, carSize.z * 0.34), matCarbon);
       rBox.position.set(0, carSize.y + 0.08 + rh, 0.10);
-      rBox.castShadow = true;
+      rBox.castShadow = !!castShadow;
       root.add(rBox);
     } else if (cfg.roofAcc === 'zpd') {
       const barY = carSize.y + 0.03 + rh;
@@ -760,13 +788,15 @@ export function createVehicleManager(scene, assets) {
   const trafficColors = ['#dc2626', '#0284c7', '#f59e0b', '#16a34a', '#f8fafc', '#334155', '#7c3aed', '#e11d48'];
 
   function spawnTrafficFleet(loopLen) {
+    const availKeys = trafficPoolKeys.filter(k => assets.models[k]);
+    const pool = availKeys.length ? availKeys : ['ferrari'];
     const countPerLane = 3;
     for (let k = 0; k < countPerLane; k++) {
       const s = k * (loopLen / countPerLane);
-      addTrafficAgent(-6.6, s + 30,  -1, 19 + (k % 3) * 2.5, trafficPoolKeys[k % trafficPoolKeys.length], trafficColors[k % trafficColors.length], loopLen);
-      addTrafficAgent(-2.2, s + 110, -1, 24 + (k % 3) * 2.5, trafficPoolKeys[(k + 1) % trafficPoolKeys.length], trafficColors[(k + 2) % trafficColors.length], loopLen);
-      addTrafficAgent(2.2,  s + 60,   1, 22 + (k % 3) * 2.2, trafficPoolKeys[(k + 2) % trafficPoolKeys.length], trafficColors[(k + 4) % trafficColors.length], loopLen);
-      addTrafficAgent(6.6,  s + 150,  1, 18 + (k % 3) * 2.0, trafficPoolKeys[(k + 3) % trafficPoolKeys.length], trafficColors[(k + 6) % trafficColors.length], loopLen);
+      addTrafficAgent(-6.6, s + 30,  -1, 19 + (k % 3) * 2.5, pool[k % pool.length], trafficColors[k % trafficColors.length], loopLen);
+      addTrafficAgent(-2.2, s + 110, -1, 24 + (k % 3) * 2.5, pool[(k + 1) % pool.length], trafficColors[(k + 2) % trafficColors.length], loopLen);
+      addTrafficAgent(2.2,  s + 60,   1, 22 + (k % 3) * 2.2, pool[(k + 2) % pool.length], trafficColors[(k + 4) % trafficColors.length], loopLen);
+      addTrafficAgent(6.6,  s + 150,  1, 18 + (k % 3) * 2.0, pool[(k + 3) % pool.length], trafficColors[(k + 6) % trafficColors.length], loopLen);
     }
   }
 
@@ -785,6 +815,7 @@ export function createVehicleManager(scene, assets) {
         clone,
         glbKey,
         { bodyMat, accentMat: matDarkTrim, glassMat, rimMat, calMat, matCarbon, brakeMat },
+        false,
         false
       );
       const norm = normalizeRealGLB(clone, glbKey, { length: 4.65, chassis: 'sedan' }, 0);

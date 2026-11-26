@@ -1,8 +1,8 @@
-import * as THREE from 'three';
+import * as THREE from '../vendor/three.module.js';
 
 // 3D showroom: every car sits on its own turntable platform in a row.
 // The camera glides between platforms; the focused car spins on its own.
-const SPACING = 8.5;
+const SPACING = 7.6;
 
 export function createShowroom(assets, vehicles) {
   const scene = new THREE.Scene();
@@ -30,11 +30,11 @@ export function createShowroom(assets, vehicles) {
   floor.rotation.x = -Math.PI / 2;
   scene.add(floor);
 
-  const platGeo = new THREE.CylinderGeometry(3.1, 3.25, 0.22, 48);
+  const platGeo = new THREE.CylinderGeometry(2.75, 2.90, 0.22, 48);
   const platMat = new THREE.MeshStandardMaterial({ color: 0x1b2230, roughness: 0.3, metalness: 0.75 });
-  const topGeo = new THREE.CylinderGeometry(2.95, 2.95, 0.02, 48);
+  const topGeo = new THREE.CylinderGeometry(2.62, 2.62, 0.02, 48);
   const topMat = new THREE.MeshStandardMaterial({ color: 0x0f141d, roughness: 0.22, metalness: 0.6 });
-  const ringGeo = new THREE.TorusGeometry(3.12, 0.035, 6, 56);
+  const ringGeo = new THREE.TorusGeometry(2.78, 0.035, 6, 56);
 
   let roster = [];
   let index = 0;
@@ -152,9 +152,9 @@ export function createShowroom(assets, vehicles) {
   function update(dt, t) {
     const targetX = index * SPACING;
     camX += (targetX - camX) * Math.min(1, dt * 7.5);
-    const lookShift = drawerOpen ? 1.7 : 0;
-    camera.position.set(camX + lookShift + 0.6, 2.35, 9.6);
-    camera.lookAt(camX + lookShift, 0.75, 0);
+    const lookShift = drawerOpen ? 1.45 : 0;
+    camera.position.set(camX + lookShift + 0.55, 1.92, 7.5);
+    camera.lookAt(camX + lookShift, 0.68, 0);
 
     key.position.set(camX + 1.5, 9, 3.5);
     key.target.position.set(camX, 0, 0);

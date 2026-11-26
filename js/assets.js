@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from '../vendor/three.module.js';
 import { GLTFLoader } from '../vendor/GLTFLoader.js';
 import { DRACOLoader } from '../vendor/DRACOLoader.js';
 import { RGBELoader } from '../vendor/RGBELoader.js';
@@ -41,12 +41,55 @@ export async function loadAllAssets(renderer, onProgress) {
   const pendingLoads = {};
   const failedLoads = new Set();
 
-  function loadGLBKey(key, onStepLabel = null) {
-    if (modelsCache[key]) return Promise.resolve(modelsCache[key]);
-    if (failedLoads.has(key)) return Promise.resolve(null);
+  // Boot items: 1 HDR + 3 textures + 3 lightweight core chassis (~2.7 MB total)
+  const bootKeys = ['ferrari', 'bmwm5', 'muscle'];
+  const progressItems = ['hdr', 'ao', 'carbonC', 'carbonN', ...bootKeys.map(k => `glb_${k}`)];
+  const progressMap = Object.fromEntries(progressItems.map(id => [id, 0]));
+  let lastLabel = 'Initializing 3D Showroom...';
+
+  function emitProgress(id, frac, label = null) {
+    if (id && id in progressMap) progressMap[id] = Math.max(progressMap[id], Math.min(1, frac));
+    if (label) lastLabel = label;
+    if (!onProgress) return;
+    const sum = Object.values(progressMap).reduce((a, b) => a + b, 0);
+    const pct = 0.06 + 0.94 * (sum / progressItems.length);
+    onProgress(Math.min(1, pct), lastLabel);
+  }
+
+  if (onProgress) onProgress(0.06, 'Initializing 3D Showroom...');
+
+  function withTimeout(promise, ms, fallback, onTimeout = null) {
+    let timer = null;
+    const timeoutPromise = new Promise(resolve => {
+      timer = setTimeout(() => {
+        if (onTimeout) onTimeout();
+        resolve(fallback);
+      }, ms);
+    });
+    return Promise.race([
+      promise.then(val => {
+        if (timer) clearTimeout(timer);
+        return val;
+      }),
+      timeoutPromise
+    ]);
+  }
+
+  function loadGLBKey(key, onStepLabel = null, progId = null) {
+    if (modelsCache[key]) {
+      if (progId) emitProgress(progId, 1);
+      return Promise.resolve(modelsCache[key]);
+    }
+    if (failedLoads.has(key)) {
+      if (progId) emitProgress(progId, 1);
+      return Promise.resolve(null);
+    }
     if (pendingLoads[key]) return pendingLoads[key];
     const url = MODEL_URLS[key];
-    if (!url) return Promise.resolve(null);
+    if (!url) {
+      if (progId) emitProgress(progId, 1);
+      return Promise.resolve(null);
+    }
 
     pendingLoads[key] = new Promise(resolve => {
       gltfLoader.load(
@@ -54,13 +97,19 @@ export async function loadAllAssets(renderer, onProgress) {
         gltf => {
           modelsCache[key] = gltf ? gltf.scene : null;
           if (!modelsCache[key]) failedLoads.add(key);
+          if (progId) emitProgress(progId, 1);
           if (onStepLabel) onStepLabel();
           resolve(modelsCache[key]);
         },
-        undefined,
+        xhr => {
+          if (progId && xhr && xhr.lengthComputable && xhr.total > 0) {
+            emitProgress(progId, 0.95 * (xhr.loaded / xhr.total), `Streaming ${key.toUpperCase()} 3D Model...`);
+          }
+        },
         err => {
           console.warn('GLB load warning:', url, err);
           failedLoads.add(key);
+          if (progId) emitProgress(progId, 1);
           if (onStepLabel) onStepLabel();
           resolve(null);
         }
@@ -69,31 +118,29 @@ export async function loadAllAssets(renderer, onProgress) {
     return pendingLoads[key];
   }
 
-  // Initial fast boot set (6 core models for instant start & traffic) + on-demand lazy loading for all other .GLBs
-  const bootKeys = ['ferrari', 'sedan', 'bmwm5', 'muscle', 'g63', 'suv_q7'];
-  const totalSteps = bootKeys.length + 4;
-  let completed = 0;
-  function step(label) {
-    completed++;
-    if (onProgress) onProgress(Math.min(1, completed / totalSteps), label);
-  }
-
-  function loadHDR(url, label) {
+  function loadHDR(url, label, progId) {
     return new Promise(resolve => {
       rgbeLoader.load(
         url,
         tex => {
           tex.mapping = THREE.EquirectangularReflectionMapping;
-          step(label);
+          emitProgress(progId, 1, label);
           resolve(tex);
         },
-        undefined,
-        () => { step(label); resolve(null); }
+        xhr => {
+          if (xhr && xhr.lengthComputable && xhr.total > 0) {
+            emitProgress(progId, 0.95 * (xhr.loaded / xhr.total));
+          }
+        },
+        () => {
+          emitProgress(progId, 1, label);
+          resolve(null);
+        }
       );
     });
   }
 
-  function loadTex(url, repeatX = 1, repeatY = 1, isColor = true, label = null) {
+  function loadTex(url, repeatX = 1, repeatY = 1, isColor = true, label = null, progId = null) {
     return new Promise(resolve => {
       texLoader.load(
         url,
@@ -103,26 +150,37 @@ export async function loadAllAssets(renderer, onProgress) {
           tex.repeat.set(repeatX, repeatY);
           tex.anisotropy = maxAniso;
           if (isColor) tex.colorSpace = THREE.SRGBColorSpace;
-          if (label) step(label);
+          if (progId) emitProgress(progId, 1, label);
           resolve(tex);
         },
         undefined,
-        () => { if (label) step(label); resolve(null); }
+        () => {
+          if (progId) emitProgress(progId, 1, label);
+          resolve(null);
+        }
       );
     });
   }
 
+  const BOOT_TIMEOUT_MS = 12000;
   const [
     hdrMorning,
     ferrariAO,
     carbonColor,
     carbonNormal
   ] = await Promise.all([
-    loadHDR('./assets/hdr/blouberg_sunrise_2_1k.hdr', 'Loaded Studio Reflection Map (.HDR)'),
-    loadTex('./assets/textures/ferrari_ao.png', 1, 1, false, 'Loaded Chassis Contact Shadow Map'),
-    loadTex('./assets/textures/Carbon.png', 12, 12, true, 'Loaded Carbon Fiber Weave Maps'),
-    loadTex('./assets/textures/Carbon_Normal.png', 12, 12, false),
-    ...bootKeys.map(k => loadGLBKey(k, () => step(`Loaded 3D ${k.toUpperCase()} Chassis (.GLB)`)))
+    withTimeout(loadHDR('./assets/hdr/blouberg_sunrise_2_1k.hdr', 'Loaded Studio Reflection Map (.HDR)', 'hdr'), BOOT_TIMEOUT_MS, null, () => emitProgress('hdr', 1)),
+    withTimeout(loadTex('./assets/textures/ferrari_ao.png', 1, 1, false, 'Loaded Chassis Contact Shadow Map', 'ao'), BOOT_TIMEOUT_MS, null, () => emitProgress('ao', 1)),
+    withTimeout(loadTex('./assets/textures/Carbon.png', 12, 12, true, 'Loaded Carbon Fiber Weave Maps', 'carbonC'), BOOT_TIMEOUT_MS, null, () => emitProgress('carbonC', 1)),
+    withTimeout(loadTex('./assets/textures/Carbon_Normal.png', 12, 12, false, null, 'carbonN'), BOOT_TIMEOUT_MS, null, () => emitProgress('carbonN', 1)),
+    ...bootKeys.map(k =>
+      withTimeout(
+        loadGLBKey(k, () => emitProgress(`glb_${k}`, 1, `Loaded 3D ${k.toUpperCase()} Chassis (.GLB)`), `glb_${k}`),
+        BOOT_TIMEOUT_MS,
+        null,
+        () => emitProgress(`glb_${k}`, 1)
+      )
+    )
   ]);
 
   // Load remaining .GLB models strictly on demand when selected in the showroom

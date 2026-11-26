@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from '../vendor/three.module.js';
 
 /**
  * Generates a smooth, anatomically accurate 3D lofted car body + greenhouse cabin

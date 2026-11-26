@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from '../vendor/three.module.js';
 import { loadAllAssets } from './assets.js';
 import { BRANDS, CAR_CATALOG, CAR_BY_ID } from './carCatalog.js';
 import {
@@ -21,6 +21,8 @@ import { createAudioSystem } from './audio.js';
 import { createShowroom } from './showroom.js';
 
 (async function initGame() {
+  const loadStatusEl = document.getElementById('load-status');
+  try {
   const container = document.getElementById('canvas-container');
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
@@ -99,7 +101,6 @@ import { createShowroom } from './showroom.js';
 
   // Load 3D .GLB chassis and automotive reflection map
   const loadBarEl = document.getElementById('load-bar-fill');
-  const loadStatusEl = document.getElementById('load-status');
   const loadingScreenEl = document.getElementById('loading-screen');
 
   const assets = await loadAllAssets(renderer, (pct, label) => {
@@ -117,7 +118,7 @@ import { createShowroom } from './showroom.js';
   const showroom = createShowroom(assets, vehicles);
 
   let playerCarDirty = true;
-  vehicles.spawnTrafficFleet(LOOP_LEN);
+  let trafficSpawned = false;
 
   if (loadingScreenEl) loadingScreenEl.classList.add('hidden');
 
@@ -455,9 +456,15 @@ import { createShowroom } from './showroom.js';
 
   function setGameState(next) {
     gameState = next;
-    if (next === 'playing' && playerCarDirty) {
-      vehicles.rebuildPlayerCar();
-      playerCarDirty = false;
+    if (next === 'playing') {
+      if (!trafficSpawned) {
+        vehicles.spawnTrafficFleet(LOOP_LEN);
+        trafficSpawned = true;
+      }
+      if (playerCarDirty) {
+        vehicles.rebuildPlayerCar();
+        playerCarDirty = false;
+      }
     }
     if (showroomUi) showroomUi.classList.toggle('hidden', next !== 'garage');
     pauseOverlay.classList.toggle('hidden', next !== 'paused');
@@ -1189,7 +1196,7 @@ import { createShowroom } from './showroom.js';
     const sx = (Math.random() - 0.5) * phys.shake;
     const sy = (Math.random() - 0.5) * phys.shake;
     const speedKmh = Math.round(Math.abs(phys.vs) * 3.6);
-    const targetFov = 58 + Math.min(20, speedKmh * 0.06) + (phys.nosActive ? 6 : 0);
+    const targetFov = 54 + Math.min(15, speedKmh * 0.045) + (phys.nosActive ? 5 : 0);
     camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 6);
     camera.updateProjectionMatrix();
 
@@ -1207,7 +1214,7 @@ import { createShowroom } from './showroom.js';
       camera.position.set(phys.x - 0.35 + sx * 0.2, 1.08 + sy * 0.2, 0.18);
       camera.lookAt(phys.x - 0.35 - phys.heading * 12, 0.98, -22);
     } else {
-      const dp = new THREE.Vector3(phys.x + phys.heading * 2.8, 2.15, 6.0 + Math.min(1.8, speedKmh * 0.006));
+      const dp = new THREE.Vector3(phys.x + phys.heading * 2.6, 1.92, 5.35 + Math.min(1.35, speedKmh * 0.0045));
       camPosSmooth.lerp(dp, Math.min(1, dt * 8.5));
       const dl = new THREE.Vector3(phys.x - phys.heading * 8, 0.98, -16);
       camLookSmooth.lerp(dl, Math.min(1, dt * 10));
@@ -1297,4 +1304,8 @@ import { createShowroom } from './showroom.js';
   });
 
   animate();
+  } catch (err) {
+    console.error('Boot error:', err);
+    if (loadStatusEl) loadStatusEl.textContent = 'Failed to load 3D engine — please refresh.';
+  }
 })();

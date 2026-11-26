@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from '../vendor/three.module.js';
 
 export const NUM_BLOCKS = 12;
 export const BLOCK_LEN = 200;
