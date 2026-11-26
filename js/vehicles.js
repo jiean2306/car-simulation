@@ -219,11 +219,45 @@ function normalizeRealGLB(modelClone, glbKey, carDef, spacerOffset = 0) {
   // Strip studio floors, fabric backdrops, and stray streetlamps embedded in third-party GLBs
   const toRemove = [];
   modelClone.traverse(n => {
-    if (n.name === 'Ground' || n.name === 'Fabric' || n.name === 'Plane.007_28' || (n.name && n.name.startsWith('LanternGlass'))) {
+    if (n.isLight || n.isCamera || /ground|floor|shadow|plane|studio|backdrop|fabric|lanternglass|camera|light/i.test(n.name || '')) {
       toRemove.push(n);
     }
   });
   toRemove.forEach(n => { if (n.parent) n.parent.remove(n); });
+const computeCarBox = (root) => {
+root.updateMatrixWorld(true);
+const meshInfos = [];
+root.traverse(n => {
+if (!n.isMesh || !n.geometry) return;
+for (let p = n; p; p = p.parent) { if (p.visible === false) return; }
+if (!n.geometry.boundingBox) n.geometry.computeBoundingBox();
+const b = n.geometry.boundingBox;
+if (!b || b.isEmpty()) return;
+const wb = b.clone().applyMatrix4(n.matrixWorld);
+const sz = new THREE.Vector3();
+const ctr = new THREE.Vector3();
+wb.getSize(sz); wb.getCenter(ctr);
+const maxXZ = Math.max(sz.x, sz.z);
+if (maxXZ > 0 && sz.y < maxXZ * 0.015) return;
+meshInfos.push({ box: wb, center: ctr, span: sz.length() });
+});
+if (!meshInfos.length) return new THREE.Box3().setFromObject(root);
+const xs = meshInfos.map(m => m.center.x).sort((a, b) => a - b);
+const ys = meshInfos.map(m => m.center.y).sort((a, b) => a - b);
+const zs = meshInfos.map(m => m.center.z).sort((a, b) => a - b);
+const mid = Math.floor(meshInfos.length / 2);
+const medCenter = new THREE.Vector3(xs[mid], ys[mid], zs[mid]);
+const dists = meshInfos.map(m => m.center.distanceTo(medCenter)).sort((a, b) => a - b);
+const spans = meshInfos.map(m => m.span).sort((a, b) => a - b);
+const maxDist = Math.max(dists[Math.floor(meshInfos.length * 0.75)] * 5, spans[mid] * 5, 1e-3);
+const out = new THREE.Box3();
+let count = 0;
+for (const m of meshInfos) {
+if (m.center.distanceTo(medCenter) <= maxDist) { out.union(m.box); count++; }
+}
+if (!count) { for (const m of meshInfos) out.union(m.box); }
+return out;
+};
 
   const wrapper = new THREE.Group();
   const inner = new THREE.Group();
@@ -234,7 +268,7 @@ function normalizeRealGLB(modelClone, glbKey, carDef, spacerOffset = 0) {
   wrapper.add(inner);
   wrapper.updateMatrixWorld(true);
 
-  const box = new THREE.Box3().setFromObject(wrapper);
+  const box = computeCarBox(wrapper);
   const size = new THREE.Vector3();
   box.getSize(size);
 
@@ -242,7 +276,7 @@ function normalizeRealGLB(modelClone, glbKey, carDef, spacerOffset = 0) {
   if (size.x > size.z * 1.15) {
     inner.rotation.y += Math.PI * 0.5;
     wrapper.updateMatrixWorld(true);
-    box.setFromObject(wrapper);
+   box.copy(computeCarBox(wrapper));
     box.getSize(size);
   }
 
@@ -269,7 +303,7 @@ function normalizeRealGLB(modelClone, glbKey, carDef, spacerOffset = 0) {
   );
   wrapper.updateMatrixWorld(true);
 
-  const box2 = new THREE.Box3().setFromObject(wrapper);
+  const box2 = computeCarBox(wrapper);
   const center2 = new THREE.Vector3();
   const finalSize = new THREE.Vector3();
   box2.getCenter(center2);
@@ -430,14 +464,14 @@ export function createVehicleManager(scene, assets) {
     roughness: 0.08,
     metalness: 0.96,
     envMapIntensity: 1.5,
-    side: THREE.DoubleSide
+    side: THREE.FrontSide
   });
 
   const matDarkTrim = new THREE.MeshStandardMaterial({
     color: 0x12161f,
     roughness: 0.48,
     metalness: 0.35,
-    side: THREE.DoubleSide
+    side: THREE.FrontSide
   });
 
   let playerWheels = [];
@@ -455,7 +489,7 @@ export function createVehicleManager(scene, assets) {
         roughness: 0.05,
         metalness: 0.98,
         envMapIntensity: 1.65,
-        side: THREE.DoubleSide
+        side: THREE.FrontSide
       });
     }
     const rough = finish === 'matte' ? 0.55 : (finish === 'metallic' ? 0.14 : (finish === 'pearl' ? 0.09 : 0.08));
@@ -465,7 +499,7 @@ export function createVehicleManager(scene, assets) {
       roughness: rough,
       metalness: metal,
       envMapIntensity: 1.38,
-      side: THREE.DoubleSide
+      side: THREE.FrontSide
     });
   }
 
@@ -769,34 +803,47 @@ export function createVehicleManager(scene, assets) {
       addTrafficAgent(6.6,  s + 150,  1, 18 + (k % 3) * 2.0, trafficPoolKeys[(k + 3) % trafficPoolKeys.length], trafficColors[(k + 6) % trafficColors.length], loopLen);
     }
   }
-
+let trafficSharedMats = null;
+  function getTrafficSharedMats() {
+    if (trafficSharedMats) return trafficSharedMats;
+    const bodyMats = {};
+trafficColors.forEach(hex => { bodyMats[hex] = makeBodyPaintMat(hex, 'metallic'); });
+trafficSharedMats = { bodyMats, glassMat: makeWindowGlassMat('smoke'), rimMat: new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.2, metalness: 0.85 }), calMat: new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.3, metalness: 0.5 }), brakeMat: new THREE.MeshStandardMaterial({ color: 0xff1e1e, emissive: 0xff1111, emissiveIntensity: 2.0 }) };
+return trafficSharedMats;
+  }
   function addTrafficAgent(laneX, startS, dir, speed, glbKey, paintHex, loopLen) {
-    const root = new THREE.Group();
     const source = assets.models[glbKey] || assets.models.ferrari;
-    if (source) {
+if (!source) return null;
+const root = new THREE.Group();
       const clone = source.clone(true);
-      const bodyMat = makeBodyPaintMat(paintHex, 'metallic');
-      const glassMat = makeWindowGlassMat('smoke');
-      const rimMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.2, metalness: 0.85 });
-      const calMat = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.3, metalness: 0.5 });
-      const brakeMat = new THREE.MeshStandardMaterial({ color: 0xff1e1e, emissive: 0xff1111, emissiveIntensity: 2.0 });
-
+const shared = getTrafficSharedMats();
+const bodyMat = shared.bodyMats[paintHex] || (shared.bodyMats[paintHex] = makeBodyPaintMat(paintHex, 'metallic'));
+const { glassMat, rimMat, calMat, brakeMat } = shared;
       applyCustomMaterialsToGLB(
         clone,
         glbKey,
         { bodyMat, accentMat: matDarkTrim, glassMat, rimMat, calMat, matCarbon, brakeMat },
         false
       );
-      const norm = normalizeRealGLB(clone, glbKey, { length: 4.65, chassis: 'sedan' }, 0);
+const catalogEntry = Object.values(CAR_CATALOG).find(c => c.glbKey === glbKey);
+const spec = { length: catalogEntry?.length || 4.65, chassis: catalogEntry?.chassis || 'sedan' };
+const norm = normalizeRealGLB(clone, glbKey, spec, 0);
       root.add(norm.group);
-    }
-
+const wheels = [];
+['wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr'].forEach(wName => {
+const wNode = clone.getObjectByName(wName);
+if (wNode) wheels.push(wNode);
+});
+if (wheels.length === 0) {
+clone.traverse(n => {
+if (n.isMesh && /wheel/i.test(n.name || '')) wheels.push(n);
+});
     if (dir < 0) root.rotation.y = Math.PI;
     scene.add(root);
 
     trafficAgents.push({
       mesh: root,
-      wheels: [],
+wheels,
       lightbarPair: [],
       isPolice: false,
       laneX,
