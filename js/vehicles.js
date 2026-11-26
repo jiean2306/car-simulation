@@ -800,27 +800,47 @@ export function createVehicleManager(scene, assets) {
     }
   }
 
-  function addTrafficAgent(laneX, startS, dir, speed, glbKey, paintHex, loopLen) {
-    const root = new THREE.Group();
-    const source = assets.models[glbKey] || assets.models.ferrari;
-    if (source) {
-      const clone = source.clone(true);
-      const bodyMat = makeBodyPaintMat(paintHex, 'metallic');
-      const glassMat = makeWindowGlassMat('smoke');
-      const rimMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.2, metalness: 0.85 });
-      const calMat = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.3, metalness: 0.5 });
-      const brakeMat = new THREE.MeshStandardMaterial({ color: 0xff1e1e, emissive: 0xff1111, emissiveIntensity: 2.0 });
+  let trafficSharedMats = null;
+  function getTrafficSharedMats() {
+    if (trafficSharedMats) return trafficSharedMats;
+    const bodyMats = {};
+    trafficColors.forEach(hex => {
+      bodyMats[hex] = makeBodyPaintMat(hex, 'metallic');
+    });
+    trafficSharedMats = {
+      bodyMats,
+      glassMat: makeWindowGlassMat('smoke'),
+      rimMat: new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.2, metalness: 0.85 }),
+      calMat: new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.3, metalness: 0.5 }),
+      brakeMat: new THREE.MeshStandardMaterial({ color: 0xff1e1e, emissive: 0xff1111, emissiveIntensity: 2.0 })
+    };
+    return trafficSharedMats;
+  }
 
-      applyCustomMaterialsToGLB(
-        clone,
-        glbKey,
-        { bodyMat, accentMat: matDarkTrim, glassMat, rimMat, calMat, matCarbon, brakeMat },
-        false,
-        false
-      );
-      const norm = normalizeRealGLB(clone, glbKey, { length: 4.65, chassis: 'sedan' }, 0);
-      root.add(norm.group);
-    }
+  function addTrafficAgent(laneX, startS, dir, speed, glbKey, paintHex, loopLen) {
+    const source = assets.models[glbKey] || assets.models.ferrari;
+    if (!source) return null;
+
+    const root = new THREE.Group();
+    const clone = source.clone(true);
+    const shared = getTrafficSharedMats();
+    const bodyMat = shared.bodyMats[paintHex] || (shared.bodyMats[paintHex] = makeBodyPaintMat(paintHex, 'metallic'));
+    const { glassMat, rimMat, calMat, brakeMat } = shared;
+
+    applyCustomMaterialsToGLB(
+      clone,
+      glbKey,
+      { bodyMat, accentMat: matDarkTrim, glassMat, rimMat, calMat, matCarbon, brakeMat },
+      false,
+      false
+    );
+    const catalogEntry = CAR_CATALOG.find(c => c.glbKey === glbKey);
+    const spec = {
+      length: catalogEntry ? catalogEntry.length : 4.65,
+      chassis: catalogEntry ? catalogEntry.chassis : 'sedan'
+    };
+    const norm = normalizeRealGLB(clone, glbKey, spec, 0);
+    root.add(norm.group);
 
     if (dir < 0) root.rotation.y = Math.PI;
     scene.add(root);

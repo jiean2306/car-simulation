@@ -23,18 +23,21 @@ import { createShowroom } from './showroom.js';
 (async function initGame() {
   const loadStatusEl = document.getElementById('load-status');
   try {
+  const isMobile = /Android|iPhone|iPad|iPod|Mobi/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && window.innerWidth <= 920 && !!(window.matchMedia && window.matchMedia('(hover: none)').matches));
   const container = document.getElementById('canvas-container');
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
     powerPreference: 'high-performance'
   });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isMobile ? 1.0 : 1.25));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
+  renderer.shadowMap.autoUpdate = false;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.96;
   renderer.autoClear = false;
+  renderer.domElement.style.touchAction = 'none';
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
@@ -42,9 +45,9 @@ import { createShowroom } from './showroom.js';
   scene.fog = new THREE.FogExp2(0x182334, 0.0018);
 
   const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 480);
-  const rearMirrorCam = new THREE.PerspectiveCamera(54, 2.7, 0.2, 220);
-  const leftMirrorCam = new THREE.PerspectiveCamera(52, 1.55, 0.2, 180);
-  const rightMirrorCam = new THREE.PerspectiveCamera(52, 1.55, 0.2, 180);
+  const rearMirrorCam = new THREE.PerspectiveCamera(54, 2.7, 0.2, 150);
+  const leftMirrorCam = new THREE.PerspectiveCamera(52, 1.55, 0.2, 120);
+  const rightMirrorCam = new THREE.PerspectiveCamera(52, 1.55, 0.2, 120);
 
   // Balanced, clean studio & daylight illumination focused directly on the player's car
   const hemiLight = new THREE.HemisphereLight(0xdbeafe, 0x1e293b, 1.05);
@@ -65,8 +68,20 @@ import { createShowroom } from './showroom.js';
   scene.add(sunLight);
   scene.add(sunLight.target);
 
-  // Mirrors layout
-  let mirrorsEnabled = true;
+  // Mirrors layout & hot-path scratch state
+  let mirrorsEnabled = !isMobile;
+  let cachedSpecs = null;
+  function getSpecs() {
+    if (!cachedSpecs) cachedSpecs = computeVehicleSpecs();
+    return cachedSpecs;
+  }
+  function invalidateSpecs() {
+    cachedSpecs = null;
+  }
+  const _dp = new THREE.Vector3();
+  const _dl = new THREE.Vector3();
+  const MIRROR_LIST = [['rear', rearMirrorCam], ['left', leftMirrorCam], ['right', rightMirrorCam]];
+  let hudCanvasAcc = 0;
   const mirrorRearEl = document.getElementById('mirror-rear');
   const mirrorLeftEl = document.getElementById('mirror-left');
   const mirrorRightEl = document.getElementById('mirror-right');
@@ -241,7 +256,8 @@ import { createShowroom } from './showroom.js';
   }
 
   function updateGarageStatsAndDynoUI() {
-    const s = computeVehicleSpecs();
+    invalidateSpecs();
+    const s = getSpecs();
     const brandLblEl = document.getElementById('garage-brand-lbl');
     if (brandLblEl) brandLblEl.textContent = s.base.brand;
     document.getElementById('garage-car-title').textContent = s.base.name;
@@ -340,7 +356,7 @@ import { createShowroom } from './showroom.js';
   }
 
   function manualShift(delta) {
-    const specs = computeVehicleSpecs();
+    const specs = getSpecs();
     const nextGear = Math.max(0, Math.min(specs.numGears, phys.gear + delta));
     if (nextGear !== phys.gear) {
       // Trigger BOV flutter on upshift under boost
@@ -444,6 +460,7 @@ import { createShowroom } from './showroom.js';
   const pauseOverlay = document.getElementById('pause-overlay');
   const topHud = document.getElementById('top-hud');
   const bottomHud = document.getElementById('bottom-hud');
+  const mobileControls = document.getElementById('mobile-controls');
   let drawerOpen = false;
 
   function setDrawerOpen(open) {
@@ -452,6 +469,10 @@ import { createShowroom } from './showroom.js';
     if (showroomUi) showroomUi.classList.toggle('drawer-open', drawerOpen);
     if (btnToggleCustom) btnToggleCustom.classList.toggle('active', drawerOpen);
     showroom.setDrawerOpen(drawerOpen);
+  }
+
+  function syncMobileControls() {
+    if (mobileControls) mobileControls.classList.toggle('hidden', !(gameState === 'playing' && isMobile));
   }
 
   function setGameState(next) {
@@ -471,6 +492,7 @@ import { createShowroom } from './showroom.js';
     topHud.classList.toggle('garage-hidden', next === 'garage');
     bottomHud.classList.toggle('garage-hidden', next === 'garage');
     mirrorsLayer.classList.toggle('hidden', !mirrorsEnabled || next !== 'playing');
+    syncMobileControls();
     if (next !== 'garage') setDrawerOpen(false);
     if (next === 'paused') {
       document.getElementById('pause-stats').textContent =
@@ -480,6 +502,7 @@ import { createShowroom } from './showroom.js';
   }
 
   function resetRun() {
+    invalidateSpecs();
     phys.vs = 0;
     phys.vx = 0;
     phys.x = 2.2;
@@ -487,7 +510,7 @@ import { createShowroom } from './showroom.js';
     phys.heading = 0;
     phys.gear = 1;
     phys.boostBar = 0;
-    phys.nos = computeVehicleSpecs().nosCap;
+    phys.nos = getSpecs().nosCap;
     scoreState.total = 0;
     scoreState.overtakes = 0;
     scoreState.combo = 1.0;
@@ -537,6 +560,9 @@ import { createShowroom } from './showroom.js';
     mirrorsLayer.classList.toggle('hidden', !mirrorsEnabled || gameState !== 'playing');
   }
   btnMirrors.addEventListener('click', toggleMirrors);
+  btnMirrors.textContent = mirrorsEnabled ? 'Mirrors: ON (M)' : 'Mirrors: OFF (M)';
+  btnMirrors.classList.toggle('active', mirrorsEnabled);
+  mirrorsLayer.classList.toggle('hidden', !mirrorsEnabled || gameState !== 'playing');
 
   // Overtake Scoring & Toasts
   const GRADES = [
@@ -666,22 +692,58 @@ import { createShowroom } from './showroom.js';
   });
   window.addEventListener('keyup', e => { keys[e.code] = false; });
 
-  renderer.domElement.addEventListener('mousedown', e => {
+  function bindTouchHold(id, code) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const set = (v, e) => {
+      e.preventDefault();
+      if (v) audio.ensureAudio();
+      keys[code] = v;
+    };
+    el.addEventListener('pointerdown', e => set(true, e));
+    el.addEventListener('pointerup', e => set(false, e));
+    el.addEventListener('pointercancel', e => set(false, e));
+    el.addEventListener('pointerleave', e => set(false, e));
+  }
+  bindTouchHold('btn-steer-left', 'ArrowLeft');
+  bindTouchHold('btn-steer-right', 'ArrowRight');
+  bindTouchHold('btn-gas', 'ArrowUp');
+  bindTouchHold('btn-brake', 'ArrowDown');
+  bindTouchHold('btn-handbrake', 'Space');
+  bindTouchHold('btn-nos', 'ShiftLeft');
+  document.getElementById('btn-mc-shift-up')?.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    audio.ensureAudio();
+    setTransmissionMode('MT');
+    manualShift(1);
+  });
+  document.getElementById('btn-mc-shift-down')?.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    audio.ensureAudio();
+    setTransmissionMode('MT');
+    manualShift(-1);
+  });
+
+  renderer.domElement.addEventListener('pointerdown', e => {
     if (gameState === 'garage') {
-      showroom.onPointerDown(e.clientX);
+      showroom.onPointerDown(e);
     } else {
       dragging = true;
       lastMX = e.clientX;
       lastMY = e.clientY;
     }
   });
-  window.addEventListener('mouseup', () => {
+  window.addEventListener('pointerup', e => {
     dragging = false;
-    showroom.onPointerUp();
+    showroom.onPointerUp(e);
   });
-  window.addEventListener('mousemove', e => {
+  window.addEventListener('pointercancel', e => {
+    dragging = false;
+    showroom.onPointerUp(e);
+  });
+  window.addEventListener('pointermove', e => {
     if (gameState === 'garage') {
-      showroom.onPointerMove(e.clientX);
+      showroom.onPointerMove(e);
     } else if (dragging && CAM_MODES[camModeIdx] === 'Orbit') {
       orbitYaw -= (e.clientX - lastMX) * 0.007;
       orbitPitch = Math.max(0.08, Math.min(0.85, orbitPitch + (e.clientY - lastMY) * 0.005));
@@ -904,7 +966,7 @@ import { createShowroom } from './showroom.js';
       fpsT = 0;
     }
 
-    const specs = computeVehicleSpecs();
+    const specs = getSpecs();
     if (gameState === 'garage') {
       audio.updateEngineAudio(900, specs.redline, 0, false, false, specs.base.soundProfile, specs.aspiration, 0);
       showroom.update(dt, elapsed);
@@ -1197,8 +1259,11 @@ import { createShowroom } from './showroom.js';
     const sy = (Math.random() - 0.5) * phys.shake;
     const speedKmh = Math.round(Math.abs(phys.vs) * 3.6);
     const targetFov = 54 + Math.min(15, speedKmh * 0.045) + (phys.nosActive ? 5 : 0);
-    camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 6);
-    camera.updateProjectionMatrix();
+    const nextFov = camera.fov + (targetFov - camera.fov) * Math.min(1, dt * 6);
+    if (Math.abs(camera.fov - nextFov) > 0.01) {
+      camera.fov = nextFov;
+      camera.updateProjectionMatrix();
+    }
 
     if (CAM_MODES[camModeIdx] === 'Orbit') {
       const dist = orbitDist;
@@ -1214,56 +1279,65 @@ import { createShowroom } from './showroom.js';
       camera.position.set(phys.x - 0.35 + sx * 0.2, 1.08 + sy * 0.2, 0.18);
       camera.lookAt(phys.x - 0.35 - phys.heading * 12, 0.98, -22);
     } else {
-      const dp = new THREE.Vector3(phys.x + phys.heading * 2.6, 1.92, 5.35 + Math.min(1.35, speedKmh * 0.0045));
-      camPosSmooth.lerp(dp, Math.min(1, dt * 8.5));
-      const dl = new THREE.Vector3(phys.x - phys.heading * 8, 0.98, -16);
-      camLookSmooth.lerp(dl, Math.min(1, dt * 10));
+      _dp.set(phys.x + phys.heading * 2.6, 1.92, 5.35 + Math.min(1.35, speedKmh * 0.0045));
+      camPosSmooth.lerp(_dp, Math.min(1, dt * 8.5));
+      _dl.set(phys.x - phys.heading * 8, 0.98, -16);
+      camLookSmooth.lerp(_dl, Math.min(1, dt * 10));
       camera.position.set(camPosSmooth.x + sx, camPosSmooth.y + sy, camPosSmooth.z);
       camera.lookAt(camLookSmooth);
     }
 
-    // Telemetry HUD Updates
-    speedValEl.textContent = speedKmh;
-    gearValEl.textContent = phys.gear === 0 ? 'R' : phys.gear;
-    rpmValEl.textContent = `${Math.round(phys.rpm)} / ${specs.redline}`;
-    rpmFillEl.style.width = `${Math.min(100, (phys.rpm / specs.redline) * 100)}%`;
+    // Dirty-checked Telemetry HUD Updates
+    const speedStr = String(speedKmh);
+    if (speedValEl.textContent !== speedStr) speedValEl.textContent = speedStr;
+    const gearStr = phys.gear === 0 ? 'R' : String(phys.gear);
+    if (gearValEl.textContent !== gearStr) gearValEl.textContent = gearStr;
+    const rpmStr = `${Math.round(phys.rpm)} / ${specs.redline}`;
+    if (rpmValEl.textContent !== rpmStr) rpmValEl.textContent = rpmStr;
+    const rpmW = `${Math.min(100, (phys.rpm / specs.redline) * 100).toFixed(1)}%`;
+    if (rpmFillEl.style.width !== rpmW) rpmFillEl.style.width = rpmW;
     const nosPct = Math.round((phys.nos / specs.nosCap) * 100);
-    nosValEl.textContent = `${nosPct}%`;
-    nosFillEl.style.width = `${nosPct}%`;
+    const nosStr = `${nosPct}%`;
+    if (nosValEl.textContent !== nosStr) nosValEl.textContent = nosStr;
+    if (nosFillEl.style.width !== nosStr) nosFillEl.style.width = nosStr;
 
-    hudLiveHpEl.textContent = `${phys.liveHp} HP`;
-    hudLiveTrqEl.textContent = `${phys.liveTorqueNm} Nm`;
-    hudLiveBoostEl.textContent = specs.aspiration === 'NA'
-      ? 'NA ATMOS'
-      : `+${phys.boostBar.toFixed(2)} BAR`;
+    const hpStr = `${phys.liveHp} HP`;
+    if (hudLiveHpEl.textContent !== hpStr) hudLiveHpEl.textContent = hpStr;
+    const trqStr = `${phys.liveTorqueNm} Nm`;
+    if (hudLiveTrqEl.textContent !== trqStr) hudLiveTrqEl.textContent = trqStr;
+    const boostStr = specs.aspiration === 'NA' ? 'NA ATMOS' : `+${phys.boostBar.toFixed(2)} BAR`;
+    if (hudLiveBoostEl.textContent !== boostStr) hudLiveBoostEl.textContent = boostStr;
 
-    if (phys.slipRatio > 0.98) {
-      hudLiveGripEl.textContent = 'WHEELSPIN!';
-      hudLiveGripEl.style.color = '#ef4444';
-    } else if (phys.slipRatio > 0.72) {
-      hudLiveGripEl.textContent = 'SLIP / DRIFT';
-      hudLiveGripEl.style.color = '#f59e0b';
-    } else {
-      const gripPct = Math.max(70, Math.round(100 - phys.slipRatio * 28));
-      hudLiveGripEl.textContent = `${gripPct}% GRIP`;
-      hudLiveGripEl.style.color = '#4ade80';
+    const gripText = phys.slipRatio > 0.98
+      ? 'WHEELSPIN!'
+      : (phys.slipRatio > 0.72 ? 'SLIP / DRIFT' : `${Math.max(70, Math.round(100 - phys.slipRatio * 28))}% GRIP`);
+    const gripColor = phys.slipRatio > 0.98 ? '#ef4444' : (phys.slipRatio > 0.72 ? '#f59e0b' : '#4ade80');
+    if (hudLiveGripEl.textContent !== gripText) {
+      hudLiveGripEl.textContent = gripText;
+      hudLiveGripEl.style.color = gripColor;
     }
 
     const blkIdx = Math.floor(phys.s / BLOCK_LEN) % NUM_BLOCKS;
     const distObj = DISTRICTS[Math.floor(blkIdx / 3)];
-    distLblEl.textContent = `${distObj.name} · ${Math.round(phys.s)}m`;
+    const distStr = `${distObj.name} · ${Math.round(phys.s)}m`;
+    if (distLblEl.textContent !== distStr) distLblEl.textContent = distStr;
 
-    drawTachometer(phys.rpm, specs.redline, phys.nosActive);
-    if (waveCanvas && waveCtx) {
-      audio.drawEngineWaveform(waveCtx, waveCanvas.width, waveCanvas.height, phys.rpm, specs.redline, specs.aspiration, phys.boostBar);
+    hudCanvasAcc += dt;
+    if (hudCanvasAcc >= 0.033) {
+      hudCanvasAcc = 0;
+      drawTachometer(phys.rpm, specs.redline, phys.nosActive);
+      if (waveCanvas && waveCtx) {
+        audio.drawEngineWaveform(waveCtx, waveCanvas.width, waveCanvas.height, phys.rpm, specs.redline, specs.aspiration, phys.boostBar);
+      }
+      drawRadar();
     }
-    drawRadar();
 
     // ---- RENDER PASS 1: FAST 60-FPS MAIN VIEWPORT ----
     const W = window.innerWidth, H = window.innerHeight;
     renderer.setScissorTest(false);
     renderer.setViewport(0, 0, W, H);
     renderer.clear();
+    if (gameState === 'playing') renderer.shadowMap.needsUpdate = true;
     renderer.render(scene, camera);
 
     // ---- RENDER PASS 2: LIVE REAR-VIEW & LEFT/RIGHT SIDE MIRRORS ----
@@ -1279,17 +1353,15 @@ import { createShowroom } from './showroom.js';
       rightMirrorCam.position.set(phys.x + 1.12, 1.02, 0.45);
       rightMirrorCam.lookAt(phys.x + 6.8, 0.92, 28);
 
-      [
-        [mirrorRects.rear, rearMirrorCam],
-        [mirrorRects.left, leftMirrorCam],
-        [mirrorRects.right, rightMirrorCam]
-      ].forEach(([r, cam]) => {
+      for (let i = 0; i < MIRROR_LIST.length; i++) {
+        const [key, cam] = MIRROR_LIST[i];
+        const r = mirrorRects[key];
         const yBottom = H - r.yTop - r.h;
         renderer.setViewport(r.x, yBottom, r.w, r.h);
         renderer.setScissor(r.x, yBottom, r.w, r.h);
         renderer.clearDepth();
         renderer.render(scene, cam);
-      });
+      }
 
       renderer.setScissorTest(false);
     }
@@ -1301,6 +1373,7 @@ import { createShowroom } from './showroom.js';
     renderer.setSize(window.innerWidth, window.innerHeight);
     showroom.resize();
     layoutMirrors();
+    syncMobileControls();
   });
 
   animate();

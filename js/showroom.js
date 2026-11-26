@@ -174,14 +174,29 @@ export function createShowroom(assets, vehicles) {
     }
   }
 
-  function onPointerDown(x) { dragging = true; lastX = x; }
-  function onPointerMove(x) {
+  let activePointerId = null;
+  function onPointerDown(xOrEvent, pointerId) {
+    const x = typeof xOrEvent === 'number' ? xOrEvent : xOrEvent.clientX;
+    const pid = pointerId !== undefined ? pointerId : (typeof xOrEvent === 'object' && xOrEvent ? xOrEvent.pointerId : null);
+    dragging = true;
+    activePointerId = pid != null ? pid : null;
+    lastX = x;
+  }
+  function onPointerMove(xOrEvent, pointerId) {
     if (!dragging || !slots[index]) return;
+    const pid = pointerId !== undefined ? pointerId : (typeof xOrEvent === 'object' && xOrEvent ? xOrEvent.pointerId : null);
+    if (activePointerId !== null && pid != null && pid !== activePointerId) return;
+    const x = typeof xOrEvent === 'number' ? xOrEvent : xOrEvent.clientX;
     slots[index].holder.rotation.y += (x - lastX) * 0.012;
     lastX = x;
     userSpinHold = 2.5;
   }
-  function onPointerUp() { dragging = false; }
+  function onPointerUp(eOrId) {
+    const pid = typeof eOrId === 'object' && eOrId ? eOrId.pointerId : eOrId;
+    if (activePointerId !== null && pid != null && pid !== activePointerId) return;
+    dragging = false;
+    activePointerId = null;
+  }
 
   function resize() {
     camera.aspect = window.innerWidth / window.innerHeight;

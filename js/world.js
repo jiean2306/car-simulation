@@ -3,7 +3,7 @@ import * as THREE from '../vendor/three.module.js';
 export const NUM_BLOCKS = 12;
 export const BLOCK_LEN = 200;
 export const LOOP_LEN = NUM_BLOCKS * BLOCK_LEN; // 2,400m loop
-export const STREAM_RADIUS = 380;
+export const STREAM_RADIUS = 320;
 
 export const DISTRICTS = [
   { name: 'Sector 1 · Straightaway', color: '#38bdf8', start: 0, end: 3 },
@@ -118,7 +118,7 @@ export function createHighwayWorld(scene, renderer) {
   const lampPoleGeo = new THREE.CylinderGeometry(0.09, 0.12, 6.2, 6);
   const lampArmGeo = new THREE.BoxGeometry(1.8, 0.1, 0.12);
   const trunkGeo = new THREE.CylinderGeometry(0.16, 0.22, 2.6, 6);
-  const crownGeo = new THREE.DodecahedronGeometry(1.75, 1);
+  const crownGeo = new THREE.DodecahedronGeometry(1.75, 0);
   const bldgGeoA = new THREE.BoxGeometry(20, 36, 26);
   const bldgGeoB = new THREE.BoxGeometry(18, 48, 22);
 
@@ -145,27 +145,34 @@ export function createHighwayWorld(scene, renderer) {
       rail.position.set(side * 9.15, 0.52, 0);
       g.add(rail);
 
-      for (let z = -75; z <= 75; z += 50) {
-        const pole = new THREE.Mesh(lampPoleGeo, matPost);
-        pole.position.set(side * 9.8, 3.1, z);
-        const arm = new THREE.Mesh(lampArmGeo, matPost);
-        arm.position.set(side * 9.0, 6.15, z);
-        g.add(pole, arm);
-
-        const trunk = new THREE.Mesh(trunkGeo, matTreeTrunk);
-        trunk.position.set(side * 13.5, 1.3, z + 22);
-        const crown = new THREE.Mesh(crownGeo, matTreeLeaf);
-        crown.position.set(side * 13.5, 3.4, z + 22);
-        g.add(trunk, crown);
-      }
-
-      // Clean low-poly background skyline silhouettes so focus stays 100% on the car
-      const b1 = new THREE.Mesh(bldgGeoA, i % 2 === 0 ? matBuildingA : matBuildingB);
-      b1.position.set(side * 34, 18, -45);
-      const b2 = new THREE.Mesh(bldgGeoB, i % 2 === 0 ? matBuildingB : matBuildingA);
-      b2.position.set(side * 36, 24, 45);
-      g.add(b1, b2);
+     
     });
+const lampPoleInst = new THREE.InstancedMesh(lampPoleGeo, matPost, 8);
+const lampArmInst = new THREE.InstancedMesh(lampArmGeo, matPost, 8);
+const trunkInst = new THREE.InstancedMesh(trunkGeo, matTreeTrunk, 8);
+const crownInst = new THREE.InstancedMesh(crownGeo, matTreeLeaf, 8);
+const bldgAInst = new THREE.InstancedMesh(bldgGeoA, i % 2 === 0 ? matBuildingA : matBuildingB, 2);
+const bldgBInst = new THREE.InstancedMesh(bldgGeoB, i % 2 === 0 ? matBuildingB : matBuildingA, 2);
+const m = new THREE.Matrix4();
+let poleIdx = 0;
+let bldgIdx = 0;
+[-1, 1].forEach(side => {
+for (let z = -75; z <= 75; z += 50) {
+m.makeTranslation(side * 9.8, 3.1, z); lampPoleInst.setMatrixAt(poleIdx, m);
+m.makeTranslation(side * 9.0, 6.15, z); lampArmInst.setMatrixAt(poleIdx, m);
+m.makeTranslation(side * 13.5, 1.3, z + 22); trunkInst.setMatrixAt(poleIdx, m);
+m.makeTranslation(side * 13.5, 3.4, z + 22); crownInst.setMatrixAt(poleIdx, m);
+poleIdx++;
+}
+m.makeTranslation(side * 34, 18, -45); bldgAInst.setMatrixAt(bldgIdx, m);
+m.makeTranslation(side * 36, 24, 45); bldgBInst.setMatrixAt(bldgIdx, m);
+bldgIdx++;
+});
+[lampPoleInst, lampArmInst, trunkInst, crownInst, bldgAInst, bldgBInst].forEach(inst => {
+inst.instanceMatrix.needsUpdate = true;
+inst.computeBoundingSphere();
+g.add(inst);
+});
 
     if (i % 3 === 0) {
       const dist = DISTRICTS[Math.floor(i / 3)];

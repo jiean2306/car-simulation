@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <script type="importmap">
     {
       "imports": {
@@ -404,6 +404,26 @@
         <button id="btn-play-music" class="st-btn" title="Music">▶ Music</button>
         <button id="btn-next-track" class="st-btn" title="Next">▶|</button>
         <input type="range" id="music-vol" min="0" max="1" step="0.05" value="0.55" title="Volume" />
+      </div>
+    </div>
+  </div>
+
+  <!-- MOBILE TOUCH CONTROLS -->
+  <div id="mobile-controls" class="hidden" aria-label="Mobile Touch Controls">
+    <div class="mc-left">
+      <button id="btn-steer-left" type="button" aria-label="Steer Left">◀</button>
+      <button id="btn-steer-right" type="button" aria-label="Steer Right">▶</button>
+    </div>
+    <div class="mc-right">
+      <div class="mc-aux">
+        <button id="btn-mc-shift-up" type="button" aria-label="Shift Up">▲</button>
+        <button id="btn-mc-shift-down" type="button" aria-label="Shift Down">▼</button>
+        <button id="btn-nos" type="button" aria-label="Nitrous Boost">NOS</button>
+        <button id="btn-handbrake" type="button" aria-label="Handbrake">HB</button>
+      </div>
+      <div class="mc-pedals">
+        <button id="btn-brake" type="button" aria-label="Brake / Reverse">BRK</button>
+        <button id="btn-gas" type="button" aria-label="Throttle / Gas">GAS</button>
       </div>
     </div>
   </div>
