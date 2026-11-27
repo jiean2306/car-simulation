@@ -103,7 +103,7 @@ export function computeVehicleSpecs() {
   const maxSpeedMs = Math.min(physTopSpeedMs * 1.04, gearTopSpeedMs);
   const topSpeedKmh = Math.round(maxSpeedMs * 3.6);
 
-  const isEV = /Dual-Motor|HyperEV/i.test(base.engineCode) && playerConfig.aspirationMod === 'stock';
+  const isEV = /Dual-Motor|HyperEV|HyperV8s|Electric/i.test(base.engineCode) && playerConfig.aspirationMod === 'stock';
 
   const idleRpm = isEV ? 0 : (redline >= 8200 ? 980 : (redline <= 5500 ? 720 : 850));
   const launchStallRpm = isEV
@@ -232,26 +232,50 @@ export function pickRealGLBKey(carDef) {
 
 // Per-GLB forward orientation rotation around Y so every model faces -Z (highway forward)
 const GLB_FORWARD_ROT_Y = {
-  ferrari:        0,
-  porsche_gt3rs:  Math.PI,
-  porsche_718:    Math.PI,
-  porsche_918:    Math.PI,
-  porsche_930:    Math.PI,
-  porsche_turbos: Math.PI,
-  bmwm5:          Math.PI,
-  sedan:          Math.PI,
-  saloon:         Math.PI,
-  g63:            Math.PI,
-  suv_q7:         Math.PI,
-  lamborghini:    Math.PI,
-  corvette:       Math.PI,
-  muscle:         60.5 * (Math.PI / 180),
-  gtr:            Math.PI * 0.5,
-  mclaren:        Math.PI,
-  hatchback:      -Math.PI * 0.5,
-  jeep_wrangler:  Math.PI,
-  xiaomi_yu7:     Math.PI,
-  car_concept:    Math.PI
+  ferrari:              0,
+  ferrari_f40:          Math.PI,
+  ferrari_sf90xx:       Math.PI,
+  porsche_gt3rs:        Math.PI,
+  porsche_turbos:       Math.PI,
+  porsche_carrera4s:    Math.PI,
+  porsche_718:          Math.PI,
+  porsche_918:          Math.PI,
+  porsche_930:          Math.PI,
+  porsche_mission_r:    Math.PI,
+  porsche_917k:         Math.PI,
+  sedan:                Math.PI,
+  bmw_m3_g80:           0,
+  bmw_m4_comp:          Math.PI,
+  bmw_m4_csl:           Math.PI,
+  bmwm5:                Math.PI,
+  bmw_m5_f90:           Math.PI,
+  bmw_m8:               Math.PI,
+  mercedes_amg_gtr:     Math.PI,
+  g63:                  Math.PI,
+  mercedes_brabus_g900: Math.PI,
+  audi_q3:              Math.PI,
+  suv_q7:               Math.PI,
+  toyota_supra_a90:     Math.PI,
+  toyota_gr86:          Math.PI,
+  toyota_grcorolla:     -Math.PI * 0.5,
+  toyota_ae86:          0,
+  toyota_camry:         Math.PI,
+  toyota_rav4:          Math.PI,
+  toyota_lc250:         Math.PI,
+  gtr:                  Math.PI * 0.5,
+  lamborghini:          Math.PI,
+  lambo_aventador:      -Math.PI * 0.5,
+  lambo_countach:       0,
+  mclaren:              Math.PI,
+  corvette:             Math.PI,
+  ford_mustang:         Math.PI,
+  ford_shelby_gt500:    Math.PI,
+  dodge_challenger:     Math.PI,
+  hyundai_ioniq5n:      Math.PI,
+  tesla_model3:         0,
+  jeep_wrangler:        Math.PI,
+  saloon:               Math.PI,
+  xiaomi_yu7:           Math.PI
 };
 
 function createRadialGlowTexture() {
@@ -268,26 +292,172 @@ function createRadialGlowTexture() {
   return new THREE.CanvasTexture(c);
 }
 
+function createContactShadowTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 256;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(128, 128, 16, 128, 128, 122);
+  g.addColorStop(0.0, 'rgba(0,0,0,0.72)');
+  g.addColorStop(0.50, 'rgba(0,0,0,0.44)');
+  g.addColorStop(0.78, 'rgba(0,0,0,0.14)');
+  g.addColorStop(0.96, 'rgba(0,0,0,0.0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 256, 256);
+  return new THREE.CanvasTexture(c);
+}
+
+const smoothedGLBKeys = new Set();
+
+/**
+ * Computes crease-aware smooth vertex normals once per cached GLB for faceted meshes
+ * (e.g. Porsche 911 Turbo S) while preserving crisp panel seams and sharp creases.
+ */
+function ensureSmoothNormals(sourceGLB, glbKey) {
+  if (!sourceGLB || glbKey !== 'porsche_turbos' || smoothedGLBKeys.has(glbKey)) return;
+  smoothedGLBKeys.add(glbKey);
+
+  const pA = new THREE.Vector3();
+  const pB = new THREE.Vector3();
+  const pC = new THREE.Vector3();
+  const cb = new THREE.Vector3();
+  const ab = new THREE.Vector3();
+  const creaseCos = 0.72; // ~44 deg crease angle preserves sharp body panel lines
+
+  sourceGLB.traverse(node => {
+    if (!node.isMesh || !node.geometry) return;
+    const geom = node.geometry;
+    const pos = geom.attributes && geom.attributes.position;
+    if (!pos || pos.count < 3) return;
+
+    const mats = Array.isArray(node.material) ? node.material : [node.material];
+    mats.forEach(m => {
+      if (m) {
+        m.flatShading = false;
+        m.needsUpdate = true;
+      }
+    });
+
+    if (!geom.boundingBox) geom.computeBoundingBox();
+    const extent = geom.boundingBox
+      ? Math.max(
+          geom.boundingBox.max.x - geom.boundingBox.min.x,
+          geom.boundingBox.max.y - geom.boundingBox.min.y,
+          geom.boundingBox.max.z - geom.boundingBox.min.z,
+          1e-4
+        )
+      : 1;
+    const qs = 25000 / extent;
+
+    const indexAttr = geom.index;
+    const triCount = indexAttr ? Math.floor(indexAttr.count / 3) : Math.floor(pos.count / 3);
+    if (triCount < 1) return;
+
+    const faceNormX = new Float32Array(triCount);
+    const faceNormY = new Float32Array(triCount);
+    const faceNormZ = new Float32Array(triCount);
+    const unitNormX = new Float32Array(triCount);
+    const unitNormY = new Float32Array(triCount);
+    const unitNormZ = new Float32Array(triCount);
+    const posBuckets = new Map();
+
+    const addRef = (vIdx, triIdx) => {
+      const k = `${Math.round(pos.getX(vIdx) * qs)}|${Math.round(pos.getY(vIdx) * qs)}|${Math.round(pos.getZ(vIdx) * qs)}`;
+      let list = posBuckets.get(k);
+      if (!list) {
+        list = [];
+        posBuckets.set(k, list);
+      }
+      list.push(triIdx);
+    };
+
+    for (let t = 0; t < triCount; t++) {
+      const i0 = indexAttr ? indexAttr.getX(t * 3) : t * 3;
+      const i1 = indexAttr ? indexAttr.getX(t * 3 + 1) : t * 3 + 1;
+      const i2 = indexAttr ? indexAttr.getX(t * 3 + 2) : t * 3 + 2;
+      pA.fromBufferAttribute(pos, i0);
+      pB.fromBufferAttribute(pos, i1);
+      pC.fromBufferAttribute(pos, i2);
+      cb.subVectors(pC, pB);
+      ab.subVectors(pA, pB);
+      cb.cross(ab);
+      faceNormX[t] = cb.x;
+      faceNormY[t] = cb.y;
+      faceNormZ[t] = cb.z;
+      const len = cb.length();
+      if (len > 1e-12) {
+        unitNormX[t] = cb.x / len;
+        unitNormY[t] = cb.y / len;
+        unitNormZ[t] = cb.z / len;
+      }
+      addRef(i0, t);
+      addRef(i1, t);
+      addRef(i2, t);
+    }
+
+    const outNorm = new Float32Array(pos.count * 3);
+    for (let t = 0; t < triCount; t++) {
+      const ux = unitNormX[t];
+      const uy = unitNormY[t];
+      const uz = unitNormZ[t];
+      for (let c = 0; c < 3; c++) {
+        const vIdx = indexAttr ? indexAttr.getX(t * 3 + c) : t * 3 + c;
+        const k = `${Math.round(pos.getX(vIdx) * qs)}|${Math.round(pos.getY(vIdx) * qs)}|${Math.round(pos.getZ(vIdx) * qs)}`;
+        const refs = posBuckets.get(k);
+        let ax = 0;
+        let ay = 0;
+        let az = 0;
+        if (refs) {
+          for (let r = 0; r < refs.length; r++) {
+            const nt = refs[r];
+            const dot = ux * unitNormX[nt] + uy * unitNormY[nt] + uz * unitNormZ[nt];
+            if (dot >= creaseCos) {
+              ax += faceNormX[nt];
+              ay += faceNormY[nt];
+              az += faceNormZ[nt];
+            }
+          }
+        }
+        const alen = Math.hypot(ax, ay, az);
+        if (alen > 1e-12) {
+          outNorm[vIdx * 3] = ax / alen;
+          outNorm[vIdx * 3 + 1] = ay / alen;
+          outNorm[vIdx * 3 + 2] = az / alen;
+        } else {
+          outNorm[vIdx * 3] = ux;
+          outNorm[vIdx * 3 + 1] = uy;
+          outNorm[vIdx * 3 + 2] = uz;
+        }
+      }
+    }
+    geom.setAttribute('normal', new THREE.BufferAttribute(outNorm, 3));
+  });
+}
+
 const rawBoundsCache = new Map();
 
 /**
  * Normalizes any real 3D .GLB car model to face -Z, sit flush at Y = 0,
- * and match the target vehicle's length while preserving realistic window & roof proportions.
+ * and match the target vehicle's exact factory length while preserving proportions.
  */
 function normalizeRealGLB(modelClone, glbKey, carDef, spacerOffset = 0) {
   // Strip studio floors, flat baked shadow quads, fabric backdrops, dangling badges, and streetlamp posts
   const toRemove = [];
   modelClone.traverse(n => {
     const nm = n.name || '';
+    const lnm = nm.toLowerCase();
     if (
       nm === 'Ground' ||
       nm === 'Fabric' ||
+      nm === 'Obj_Shadow_Plane' ||
+      nm === 'Plane_0' ||
       nm === 'Plane.007_28' ||
       nm === 'Plane.015_62' ||
       nm === 'Object_140' ||
       nm.startsWith('LanternGlass') ||
       (glbKey === 'porsche_930' && (nm === 'Cylinder.002_32' || nm === 'Cylinder.006_20')) ||
-      (glbKey === 'gtr' && nm === 'GTR.029')
+      (glbKey === 'gtr' && nm === 'GTR.029') ||
+      (lnm.includes('shadow') && lnm.includes('plane'))
     ) {
       toRemove.push(n);
     }
@@ -423,34 +593,56 @@ function applyCustomMaterialsToGLB(modelClone, glbKey, mats, twoTone, castShadow
     const nName = (node.name || '').toLowerCase();
     const applyToSingleMat = origMat => {
       const mName = ((origMat && origMat.name) || '').toLowerCase();
+      const hasDiffuseTex = !!(origMat && origMat.map);
+      const isTransparentCoat = !!(origMat && origMat.transparent && origMat.opacity < 0.95);
 
-      // 1. Primary Body Paint
-      if (mName.startsWith('paint 2')) {
+      // 1. Primary Body Paint (protect textured atlases/badges/liveries from flat overwrite)
+      if (mName.startsWith('paint 2') && !hasDiffuseTex) {
         return twoTone ? accentMat : bodyMat;
       }
 
-      const isPaint =
-        nName === 'body' ||
-        mName === 'body_color' ||
-        mName === 'paint' ||
-        mName === 'coat' ||
-        mName === 'bodycolor' ||
-        mName === 'new_material' ||
-        mName === 'mat8' ||
-        mName === 'sennapaint' ||
-        mName === 'sennapaintmain' ||
-        mName.startsWith('paint 1') ||
-        (glbKey === 'suv_q7' && mName === 'material') ||
-        (glbKey === 'jeep_wrangler' && mName === 'material') ||
-        (glbKey === 'xiaomi_yu7' && mName === 'carpaint') ||
-        (glbKey === 'hatchback' && (mName === 'material.010' || mName === 'material.012')) ||
-        mName.includes('carpaint') ||
-        mName.includes('car_paint') ||
-        mName.includes('paint_material') ||
-        mName.includes('body_paint') ||
-        mName.includes('coloured_material');
+      const isPalettePaint =
+        (glbKey === 'toyota_supra_a90' && nName.startsWith('paint_') && mName === 'palettematerial003') ||
+        (glbKey === 'hyundai_ioniq5n' && nName.includes('paint_geo') && !nName.includes('red_paint') && mName === 'palettematerial004');
 
-      if (isPaint && !mName.includes('black') && !mName.includes('secondary')) {
+      const isPaint =
+        isPalettePaint ||
+        (!hasDiffuseTex &&
+         !isTransparentCoat &&
+         (nName === 'body' ||
+          mName === 'body_color' ||
+          mName === 'paint' ||
+          mName === 'coat' ||
+          mName === 'bodycolor' ||
+          mName === 'new_material' ||
+          mName === 'mat8' ||
+          mName === 'sennapaint' ||
+          mName === 'sennapaintmain' ||
+          mName === 'bodypaint.001' ||
+          mName === 'hoodpainttextured1mtl' ||
+          mName === 'meshesbody151mtl' ||
+          mName === 'm4xnme_paint' ||
+          mName === 'bm_carpaint_max1' ||
+          mName === 'mt_body' ||
+          mName === 'primary.003' ||
+          mName === 'color_2' ||
+          mName === 'car_paint' ||
+          mName === 'tdummy_material_0_085' ||
+          mName === 'rtmi_1203070001_002' ||
+          mName === 'jmi_1355060001_004' ||
+          mName === 'mmat_gallardo_base1' ||
+          mName === 'material.012' ||
+          mName.startsWith('paint 1') ||
+          (glbKey === 'ferrari_f40' && mName === 'material') ||
+          (glbKey === 'suv_q7' && mName === 'material') ||
+          (glbKey === 'xiaomi_yu7' && mName === 'carpaint') ||
+          mName.includes('carpaint') ||
+          mName.includes('car_paint') ||
+          mName.includes('paint_material') ||
+          mName.includes('body_paint') ||
+          mName.includes('coloured_material')));
+
+      if (isPaint && !mName.includes('black') && !mName.includes('secondary') && !mName.includes('trim') && !mName.includes('caliper')) {
         if (twoTone && (nName.includes('hood') || nName.includes('roof') || nName.includes('bonnet'))) {
           return accentMat;
         }
@@ -458,49 +650,93 @@ function applyCustomMaterialsToGLB(modelClone, glbKey, mats, twoTone, castShadow
       }
 
       // 2. Window Glass (excluding headlight/taillight lenses and screens)
+      const isPaletteGlass =
+        (glbKey === 'toyota_supra_a90' && mName === 'palettematerial001') ||
+        (glbKey === 'hyundai_ioniq5n' && mName === 'palettematerial002');
+
       const isWindow =
-        (nName === 'glass' ||
-         mName === 'glass_gray' ||
-         mName === 'glass' ||
-         mName === 'glass_18' ||
-         mName === 'window_glass' ||
-         mName === 'vidiro' ||
-         mName === 'vidrio2' ||
-         mName === 'vidrionegro' ||
-         mName === 'mat17' ||
-         mName === 'senna_glass' ||
-         mName === 'windows' ||
-         mName === 'd_glass' ||
-         mName === 'マテリアル.037' ||
-         mName === 'マテリアル.653' ||
-         mName.includes('untitledmat_glass') ||
-         mName.includes('window_material') ||
-         mName.includes('mmat_glass') ||
-         mName.includes('twixer_992_glass.002')) &&
-        !mName.includes('light') &&
-        !mName.includes('red') &&
-        !mName.includes('screen') &&
-        !mName.includes('int');
+        isPaletteGlass ||
+        (glbKey === 'ford_mustang' && mName === 'glass_clear' && !nName.includes('headlight') && !nName.includes('tailight') && !nName.includes('bumper') && !nName.includes('cylinder')) ||
+        ((nName === 'glass' ||
+          mName === 'glass_gray' ||
+          mName === 'glass' ||
+          mName === 'glass_18' ||
+          mName === 'glass_d' ||
+          mName === 'glass.002' ||
+          mName === 'glass.003' ||
+          mName === 'dark_glass' ||
+          mName === 'frost_glass' ||
+          mName === 'window' ||
+          mName === 'windows' ||
+          mName === 'window1mtl' ||
+          mName === 'rearleftdoorwindow1mtl' ||
+          mName === 'mesheswindows1mtl' ||
+          mName === 'bm_glass_windowfront_low1' ||
+          mName === 'window_black' ||
+          mName === 'window_glass' ||
+          mName === 'front_glass' ||
+          mName === 'tinted_glass' ||
+          mName === 'f40_window' ||
+          mName === 'f40_window.001' ||
+          mName === 'f40_glass' ||
+          mName === 'vidiro' ||
+          mName === 'vidrio2' ||
+          mName === 'vidrionegro' ||
+          mName === 'mat17' ||
+          mName === 'senna_glass' ||
+          mName === 'd_glass' ||
+          mName === 'rtmi_glass1' ||
+          mName === 'mt_windscreens' ||
+          mName === 'mt_glass_translucent' ||
+          mName === 'car_windows.etc.png' ||
+          mName === 'マテリアル.037' ||
+          mName === 'マテリアル.653' ||
+          mName.startsWith('extwindowsglass') ||
+          mName.startsWith('intwindows') ||
+          mName.startsWith('m4xnme_glassclear') ||
+          mName.includes('untitledmat_glass') ||
+          mName.includes('window_material') ||
+          mName.includes('mmat_glass') ||
+          mName.includes('twixer_992_glass.002')) &&
+         !nName.includes('headlight') &&
+         !mName.includes('light') &&
+         !mName.includes('red') &&
+         !mName.includes('amber') &&
+         !mName.includes('screen') &&
+         !mName.includes('int'));
 
       if (isWindow) {
         return glassMat;
       }
 
-      // 3. Alloy Rims
+      // 3. Alloy Rims (protect combined tire+rim UV atlases via !hasDiffuseTex so rubber stays dark)
+      const isDedicatedRim =
+        (glbKey === 'toyota_gr86' && nName.includes('_rim_')) ||
+        (glbKey === 'ford_shelby_gt500' && mName === 'glossblack' && nName.includes('gt500.wheel.')) ||
+        (glbKey === 'ford_mustang' && nName.includes('frdperofrmcrim') && (mName === 'material_205' || mName.startsWith('aluminium_clean')));
+
       const isRim =
-        nName.startsWith('rim_') ||
-        mName === '930_rim' ||
-        mName === 'wheel_rim' ||
-        mName === 'gt4_rimface' ||
-        mName === 'q7rin' ||
-        mName === 'mat22' ||
-        mName === 'alum' ||
-        mName === 'rim1' ||
-        mName === 'rim2' ||
-        mName.includes('jmi_rim') ||
-        mName.includes('3dwheel1a') ||
-        mName.includes('wheels_chrome') ||
-        mName.includes('tire_hub');
+        isDedicatedRim ||
+        (!hasDiffuseTex &&
+         (nName.startsWith('rim_') ||
+          mName === '930_rim' ||
+          mName === 'wheel_rim' ||
+          mName === 'gt4_rimface' ||
+          mName === 'carrera4s_rimface' ||
+          mName === 'mat22' ||
+          mName === 'alum' ||
+          mName === 'rim1' ||
+          mName === 'rim2' ||
+          mName === 'mt_alloywheels' ||
+          mName === 'meshesm8rim1mtl' ||
+          mName === 'meshesm8rim0011mtl' ||
+          mName === 'bm_rim_main_max1' ||
+          mName === 'bm_rim_secondary_max1' ||
+          mName === 'ao_chrome_rim' ||
+          mName === 'wheelcolor1mtl' ||
+          mName === 'yu7rim_c1' ||
+          mName === 'f40_rrims' ||
+          mName.includes('wheels_chrome')));
 
       if (isRim) {
         return rimMat;
@@ -512,8 +748,14 @@ function applyCustomMaterialsToGLB(modelClone, glbKey, mats, twoTone, castShadow
         nName === 'brakes' ||
         mName === 'brake' ||
         mName === 'caliper' ||
+        mName === 'calipers' ||
+        mName === 'calliper' ||
+        mName === 'caliper1mtl' ||
+        mName === 'calliperpaintrl1mtl' ||
+        mName === 'mt_brakecaliper' ||
         mName === 'calip_1' ||
         mName === 'calip_2' ||
+        mName === 'f40_mechanics.001' ||
         mName.includes('callipera') ||
         mName.includes('amdb11_caliper') ||
         mName.includes('tire_brake');
@@ -523,16 +765,24 @@ function applyCustomMaterialsToGLB(modelClone, glbKey, mats, twoTone, castShadow
       }
 
       // 5. Taillights / Brakelights
-      if (nName === 'lights_red' || mName === 'taillight_glass' || mName === 'taillight' || mName.includes('brakelight')) {
+      if (
+        nName === 'lights_red' ||
+        mName === 'taillight_glass' ||
+        mName === 'taillight' ||
+        mName === 'redglass' ||
+        mName === 'rearlight' ||
+        mName === 'super_brakelight' ||
+        mName.includes('brakelight')
+      ) {
         return brakeMat;
       }
 
-      // 6. Carbon Fiber Trim
-      if (mName.includes('carbon')) {
+      // 6. Carbon Fiber Trim (preserve textured meshes unless explicitly untextured carbon trim)
+      if (!hasDiffuseTex && mName.includes('carbon')) {
         return twoTone ? accentMat : matCarbon;
       }
 
-      origMat.envMapIntensity = 1.35;
+      origMat.envMapIntensity = 1.38;
       return origMat;
     };
 
@@ -551,6 +801,7 @@ export function createVehicleManager(scene, assets) {
   scene.add(playerRoot);
 
   const radialGlowTex = createRadialGlowTexture();
+  const contactShadowTex = createContactShadowTexture();
 
   const matCarbon = new THREE.MeshStandardMaterial({
     color: 0x1c2026,
@@ -593,21 +844,37 @@ export function createVehicleManager(scene, assets) {
   function makeBodyPaintMat(hexColor, finish) {
     if (finish === 'carbon') return matCarbon;
     if (finish === 'chrome') {
-      return new THREE.MeshStandardMaterial({
+      return new THREE.MeshPhysicalMaterial({
         color: new THREE.Color(hexColor),
-        roughness: 0.05,
-        metalness: 0.98,
-        envMapIntensity: 1.65,
+        roughness: 0.04,
+        metalness: 0.99,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.02,
+        envMapIntensity: 1.75,
         side: THREE.DoubleSide
       });
     }
-    const rough = finish === 'matte' ? 0.55 : (finish === 'metallic' ? 0.14 : (finish === 'pearl' ? 0.09 : 0.08));
-    const metal = finish === 'metallic' ? 0.85 : (finish === 'matte' ? 0.20 : (finish === 'pearl' ? 0.62 : 0.45));
-    return new THREE.MeshStandardMaterial({
+    if (finish === 'matte') {
+      return new THREE.MeshPhysicalMaterial({
+        color: new THREE.Color(hexColor),
+        roughness: 0.52,
+        metalness: 0.22,
+        clearcoat: 0.08,
+        clearcoatRoughness: 0.42,
+        envMapIntensity: 1.15,
+        side: THREE.DoubleSide
+      });
+    }
+    const rough = finish === 'metallic' ? 0.16 : (finish === 'pearl' ? 0.12 : 0.10);
+    const metal = finish === 'metallic' ? 0.82 : (finish === 'pearl' ? 0.58 : 0.25);
+    return new THREE.MeshPhysicalMaterial({
       color: new THREE.Color(hexColor),
       roughness: rough,
       metalness: metal,
-      envMapIntensity: 1.38,
+      clearcoat: 1.0,
+      clearcoatRoughness: finish === 'pearl' ? 0.03 : 0.045,
+      sheen: finish === 'pearl' ? 0.45 : 0.0,
+      envMapIntensity: 1.50,
       side: THREE.DoubleSide
     });
   }
@@ -723,6 +990,7 @@ export function createVehicleManager(scene, assets) {
     const camberRad = (cfg.camberDeg * Math.PI) / 180;
 
     if (sourceGLB) {
+      ensureSmoothNormals(sourceGLB, glbKey);
       const modelClone = sourceGLB.clone(true);
       applyCustomMaterialsToGLB(
         modelClone,
@@ -758,7 +1026,18 @@ export function createVehicleManager(scene, assets) {
 
     // ---- OPTIONAL CUSTOM REAR AERO WING (Only when explicitly added by player!) ----
     const activeWing = cfg.spoiler;
-    const isHighDeckGLB = (glbKey === 'suv_q7' || glbKey === 'g63' || glbKey === 'jeep_wrangler' || glbKey === 'xiaomi_yu7');
+    const isHighDeckGLB = (
+      glbKey === 'suv_q7' ||
+      glbKey === 'g63' ||
+      glbKey === 'mercedes_brabus_g900' ||
+      glbKey === 'audi_q3' ||
+      glbKey === 'jeep_wrangler' ||
+      glbKey === 'xiaomi_yu7' ||
+      glbKey === 'toyota_rav4' ||
+      glbKey === 'toyota_lc250' ||
+      glbKey === 'toyota_grcorolla' ||
+      glbKey === 'hyundai_ioniq5n'
+    );
     const deckY = isHighDeckGLB ? carSize.y * 0.94 : carSize.y * 0.68;
 
     if (activeWing === 'lip') {
@@ -823,23 +1102,20 @@ export function createVehicleManager(scene, assets) {
       });
     }
 
-    // ---- GROUND CONTACT AO SHADOW ----
-    if (assets.textures.ferrariAO) {
-      const aoPlane = new THREE.Mesh(
-        new THREE.PlaneGeometry(carSize.x * 1.18, carSize.z * 1.03),
-        new THREE.MeshBasicMaterial({
-          map: assets.textures.ferrariAO,
-          blending: THREE.MultiplyBlending,
-          premultipliedAlpha: true,
-          transparent: true,
-          depthWrite: false
-        })
-      );
-      aoPlane.rotation.x = -Math.PI / 2;
-      aoPlane.position.y = 0.012;
-      aoPlane.userData.isRayIgnore = true;
-      root.add(aoPlane);
-    }
+    // ---- SOFT RADIAL GROUND CONTACT SHADOW ----
+    const aoPlane = new THREE.Mesh(
+      new THREE.PlaneGeometry(carSize.x * 1.16, carSize.z * 1.06),
+      new THREE.MeshBasicMaterial({
+        map: contactShadowTex,
+        blending: THREE.NormalBlending,
+        transparent: true,
+        depthWrite: false
+      })
+    );
+    aoPlane.rotation.x = -Math.PI / 2;
+    aoPlane.position.y = 0.012;
+    aoPlane.userData.isRayIgnore = true;
+    root.add(aoPlane);
 
     // ---- SOFT RADIAL NEON UNDERGLOW ----
     if (cfg.underglow && cfg.underglow !== 'none') {
@@ -1029,6 +1305,7 @@ export function createVehicleManager(scene, assets) {
     const source = assets.models[glbKey] || assets.models.ferrari;
     if (!source) return null;
 
+    ensureSmoothNormals(source, glbKey);
     const root = new THREE.Group();
     const clone = source.clone(true);
     const shared = getTrafficSharedMats();

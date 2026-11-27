@@ -12,7 +12,7 @@
   </script>
   <title>Zootopia Velocity — 3D Showroom &amp; Driving Simulator</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b1220'/%3E%3Cpath d='M12 38l7-12h26l7 12v10H12z' fill='%2338bdf8'/%3E%3Ccircle cx='20' cy='48' r='6' fill='%23f59e0b'/%3E%3Ccircle cx='44' cy='48' r='6' fill='%23f59e0b'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="./css/style.css" />
+  <link rel="stylesheet" href="./css/style.css?v=3" />
 </head>
 <body>
   <div id="canvas-container"></div>
@@ -39,7 +39,7 @@
       <div class="glass sr-top-actions">
         <button id="btn-car-dropdown" class="btn active car-dd-trigger" title="Browse & Pick Any Car">
           <span>All Cars</span>
-          <span class="sr-counter" id="sr-counter">1 / 127</span>
+          <span class="sr-counter" id="sr-counter">1 / 44</span>
           <span>▾</span>
         </button>
         <div class="sr-modes" id="mode-selector">
@@ -54,8 +54,8 @@
     <!-- Searchable Car Model Picker Dropdown with SVG Model Icons -->
     <div id="car-dropdown-panel" class="glass car-dd-panel hidden">
       <div class="car-dd-header">
-        <input type="text" id="car-dd-search" class="car-dd-search" placeholder="Search 127 cars (RS6, G63, Civic Type R, Supra, X5)..." autocomplete="off" />
-        <span id="car-dd-count" class="car-dd-count">127 cars</span>
+        <input type="text" id="car-dd-search" class="car-dd-search" placeholder="Search 44 real 3D cars (Supra, M3, F40, GT500, Countach)..." autocomplete="off" />
+        <span id="car-dd-count" class="car-dd-count">44 cars</span>
       </div>
       <div id="car-dd-list" class="car-dd-list"></div>
     </div>
@@ -441,6 +441,6 @@
     </div>
   </div>
 
-  <script type="module" src="./js/main.js"></script>
+  <script type="module" src="./js/main.js?v=3"></script>
 </body>
 </html>

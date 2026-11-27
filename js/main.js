@@ -146,6 +146,9 @@ import { createShowroom } from './showroom.js';
   const carDdCountEl = document.getElementById('car-dd-count');
   const carDdListEl = document.getElementById('car-dd-list');
   const srCarIdBtn = document.getElementById('sr-car-id-btn');
+  if (carDdSearchEl) {
+    carDdSearchEl.placeholder = `Search ${CAR_CATALOG.length} real 3D cars (Supra, M3, G63, SF90, AE86)...`;
+  }
 
   function getChassisSvgIcon(chassis, color) {
     const c = color || '#38bdf8';
@@ -220,7 +223,8 @@ import { createShowroom } from './showroom.js';
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'car-dd-item' + (c.id === playerConfig.carId ? ' active' : '');
-      const aspShort = c.aspiration === 'NA' ? 'NA' : (c.aspiration === 'SUPERCHARGED' ? 'SC' : (c.aspiration === 'TWIN-TURBO' ? 'TT' : 'TURBO'));
+      const isCarEV = /Dual-Motor|HyperEV|HyperV8s|Electric/i.test(c.engineCode);
+      const aspShort = isCarEV ? 'EV' : (c.aspiration === 'NA' ? 'NA' : (c.aspiration === 'SUPERCHARGED' ? 'SC' : (c.aspiration === 'TWIN-TURBO' ? 'TT' : 'TURBO')));
       btn.innerHTML =
         `<span class="car-dd-icon">${getChassisSvgIcon(c.chassis, c.defaultColor)}</span>` +
         `<span class="car-dd-meta">` +
@@ -396,9 +400,9 @@ import { createShowroom } from './showroom.js';
 
     const aspEl = document.getElementById('garage-asp-tag');
     if (aspEl) {
-      aspEl.textContent = s.maxBoostBar > 0 ? `${s.aspiration} ${s.maxBoostBar}B` : 'NA';
-      aspEl.classList.toggle('asp-na', s.aspiration === 'NA');
-      aspEl.classList.toggle('asp-sc', s.aspiration === 'SUPERCHARGED');
+      aspEl.textContent = s.isEV ? 'EV' : (s.maxBoostBar > 0 ? `${s.aspiration} ${s.maxBoostBar}B` : 'NA');
+      aspEl.classList.toggle('asp-na', s.aspiration === 'NA' && !s.isEV);
+      aspEl.classList.toggle('asp-sc', s.aspiration === 'SUPERCHARGED' || s.isEV);
     }
     if (srCounterEl) srCounterEl.textContent = `${showroomIndex + 1} / ${showroomRoster.length}`;
 
@@ -413,7 +417,7 @@ import { createShowroom } from './showroom.js';
 
     // Sync Bottom HUD Car & Engine Header
     document.getElementById('hud-car-name').textContent = `${s.base.brand} ${s.base.name}`;
-    document.getElementById('hud-asp-badge').textContent = `${s.base.engineCode} · ${s.aspiration}`;
+    document.getElementById('hud-asp-badge').textContent = `${s.base.engineCode} · ${s.isEV ? 'EV' : s.aspiration}`;
 
     drawDynoGraph(s);
   }

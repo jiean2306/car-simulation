@@ -3,6 +3,8 @@ import * as THREE from '../vendor/three.module.js';
 // 3D showroom: virtualized 3-platform turntable pool so even 120+ cars cause zero lag.
 // Only the centered platform mounts the active 3D car; side platforms frame the view.
 const SPACING = 7.6;
+// Canonical vehicles face -Z while the showroom camera sits on +Z, so π - 0.62 frames the front-left 3/4 hero angle.
+const HERO_ROT_Y = Math.PI - 0.62;
 
 export function createShowroom(assets, vehicles) {
   const scene = new THREE.Scene();
@@ -39,9 +41,11 @@ export function createShowroom(assets, vehicles) {
   let index = 0;
   let camX = 0;
   let drawerOpen = false;
+  let pendingHeroCarId = null;
   const modelCache = new Map(); // LRU cache of recently built showroom cars (max 4)
 
   let userSpinHold = 0;
+  let arrivalHold = 1.2;
   let dragging = false;
   let lastX = 0;
 
@@ -57,7 +61,7 @@ export function createShowroom(assets, vehicles) {
     ring.position.y = 0.2;
     const holder = new THREE.Group();
     holder.position.y = 0.24;
-    holder.rotation.y = -0.6;
+    holder.rotation.y = HERO_ROT_Y;
     group.add(plat, top, ring, holder);
     scene.add(group);
     return { group, holder, ringMat, car: null, carId: null, loading: false };
@@ -99,13 +103,18 @@ export function createShowroom(assets, vehicles) {
     if (!force && slot.carId === def.id && !slot.loading) return;
 
     const changedCar = slot.carId !== def.id;
+    const snapHeroOnArrival = pendingHeroCarId === def.id && !slot.car && userSpinHold <= 0;
     const res = getCachedOrBuildCar(def, force);
     clearSlotCar(slot);
-    if (changedCar) slot.holder.rotation.y = -0.6;
+    if (changedCar || snapHeroOnArrival) {
+      slot.holder.rotation.y = HERO_ROT_Y;
+      arrivalHold = 1.2;
+    }
 
     if (res.pending) {
       slot.loading = true;
       slot.carId = def.id;
+      if (changedCar) pendingHeroCarId = def.id;
       const targetIndex = index;
       res.pending.then(loaded => {
         if (loaded && targetIndex === index && roster[index] && roster[index].id === def.id) {
@@ -118,6 +127,11 @@ export function createShowroom(assets, vehicles) {
       slot.car = res.group;
       slot.carId = def.id;
       slot.loading = false;
+      if (pendingHeroCarId === def.id) pendingHeroCarId = null;
+      if (changedCar || snapHeroOnArrival) {
+        slot.holder.rotation.y = HERO_ROT_Y;
+        arrivalHold = 1.2;
+      }
       slot.holder.add(res.group);
     }
   }
@@ -183,6 +197,7 @@ export function createShowroom(assets, vehicles) {
     rimR.position.set(camX + 4.5, 1.4, -2.5);
 
     userSpinHold = Math.max(0, userSpinHold - dt);
+    arrivalHold = Math.max(0, arrivalHold - dt);
     const center = pool[1];
     const targetEmissive = center.loading
       ? 1.8 + Math.sin(t * 8.0) * 1.4
@@ -191,7 +206,7 @@ export function createShowroom(assets, vehicles) {
     pool[0].ringMat.emissiveIntensity = 0.15;
     pool[2].ringMat.emissiveIntensity = 0.15;
 
-    if (userSpinHold <= 0) center.holder.rotation.y += dt * 0.42;
+    if (!center.loading && userSpinHold <= 0 && arrivalHold <= 0) center.holder.rotation.y += dt * 0.18;
   }
 
   let activePointerId = null;

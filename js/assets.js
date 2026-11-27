@@ -2,28 +2,55 @@ import * as THREE from '../vendor/three.module.js';
 import { GLTFLoader } from '../vendor/GLTFLoader.js';
 import { DRACOLoader } from '../vendor/DRACOLoader.js';
 import { RGBELoader } from '../vendor/RGBELoader.js';
+import { MeshoptDecoder } from '../vendor/meshopt_decoder.module.js';
+
+const ASSET_VER = '?v=3';
 
 const MODEL_URLS = {
-  ferrari:        './assets/models/ferrari.glb',
-  porsche_gt3rs:  './assets/models/porsche_gt3rs.glb',
-  porsche_718:    './assets/models/porsche_718.glb',
-  porsche_918:    './assets/models/porsche_918.glb',
-  porsche_930:    './assets/models/porsche_930.glb',
-  porsche_turbos: './assets/models/porsche911.glb',
-  bmwm5:          './assets/models/bmwm5.glb',
-  sedan:          './assets/models/sedan.glb',
-  saloon:         './assets/models/saloon.glb',
-  g63:            './assets/models/g63.glb',
-  suv_q7:         './assets/models/suv_q7.glb',
-  lamborghini:    './assets/models/lamborghini.glb',
-  corvette:       './assets/models/corvette.glb',
-  muscle:         './assets/models/muscle.glb',
-  gtr:            './assets/models/gtr.glb',
-  mclaren:        './assets/models/mclaren.glb',
-  hatchback:      './assets/models/hatchback.glb',
-  jeep_wrangler:  './assets/models/jeep_wrangler.glb',
-  xiaomi_yu7:     './assets/models/xiaomi_yu7.glb',
-  car_concept:    './assets/models/CarConcept.glb'
+  ferrari:              './assets/models/ferrari.glb',
+  ferrari_f40:          './assets/models/ferrari_f40.glb',
+  ferrari_sf90xx:       './assets/models/ferrari_sf90xx.glb',
+  porsche_gt3rs:        './assets/models/porsche_gt3rs.glb',
+  porsche_turbos:       './assets/models/porsche_turbos.glb',
+  porsche_carrera4s:    './assets/models/porsche911.glb',
+  porsche_718:          './assets/models/porsche_718.glb',
+  porsche_918:          './assets/models/porsche_918.glb',
+  porsche_930:          './assets/models/porsche_930.glb',
+  porsche_mission_r:    './assets/models/porsche_mission_r.glb',
+  porsche_917k:         './assets/models/porsche_917k.glb',
+  sedan:                './assets/models/sedan.glb',
+  bmw_m3_g80:           './assets/models/bmw_m3_g80.glb',
+  bmw_m4_comp:          './assets/models/bmw_m4_comp.glb',
+  bmw_m4_csl:           './assets/models/bmw_m4_csl.glb',
+  bmwm5:                './assets/models/bmwm5.glb',
+  bmw_m5_f90:           './assets/models/bmw_m5_f90.glb',
+  bmw_m8:               './assets/models/bmw_m8.glb',
+  mercedes_amg_gtr:     './assets/models/mercedes_amg_gtr.glb',
+  g63:                  './assets/models/g63.glb',
+  mercedes_brabus_g900: './assets/models/mercedes_brabus_g900.glb',
+  audi_q3:              './assets/models/audi_q3.glb',
+  suv_q7:               './assets/models/suv_q7.glb',
+  toyota_supra_a90:     './assets/models/toyota_supra_a90.glb',
+  toyota_gr86:          './assets/models/toyota_gr86.glb',
+  toyota_grcorolla:     './assets/models/toyota_grcorolla.glb',
+  toyota_ae86:          './assets/models/toyota_ae86.glb',
+  toyota_camry:         './assets/models/toyota_camry.glb',
+  toyota_rav4:          './assets/models/toyota_rav4.glb',
+  toyota_lc250:         './assets/models/toyota_lc250.glb',
+  gtr:                  './assets/models/gtr.glb',
+  lamborghini:          './assets/models/lamborghini.glb',
+  lambo_aventador:      './assets/models/lambo_aventador.glb',
+  lambo_countach:       './assets/models/lambo_countach.glb',
+  mclaren:              './assets/models/mclaren.glb',
+  corvette:             './assets/models/corvette.glb',
+  ford_mustang:         './assets/models/ford_mustang.glb',
+  ford_shelby_gt500:    './assets/models/ford_shelby_gt500.glb',
+  dodge_challenger:     './assets/models/dodge_challenger.glb',
+  hyundai_ioniq5n:      './assets/models/hyundai_ioniq5n.glb',
+  tesla_model3:         './assets/models/tesla_model3.glb',
+  jeep_wrangler:        './assets/models/jeep_wrangler.glb',
+  saloon:               './assets/models/saloon.glb',
+  xiaomi_yu7:           './assets/models/xiaomi_yu7.glb'
 };
 
 export async function loadAllAssets(renderer, onProgress) {
@@ -34,6 +61,7 @@ export async function loadAllAssets(renderer, onProgress) {
 
   const gltfLoader = new GLTFLoader();
   gltfLoader.setDRACOLoader(dracoLoader);
+  gltfLoader.setMeshoptDecoder(MeshoptDecoder);
 
   const rgbeLoader = new RGBELoader();
   const texLoader = new THREE.TextureLoader();
@@ -94,7 +122,7 @@ export async function loadAllAssets(renderer, onProgress) {
 
     pendingLoads[key] = new Promise(resolve => {
       gltfLoader.load(
-        url,
+        url + ASSET_VER,
         gltf => {
           modelsCache[key] = gltf ? gltf.scene : null;
           if (!modelsCache[key]) failedLoads.add(key);
